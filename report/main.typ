@@ -2,6 +2,8 @@
 #import "content/intro.typ" as intro
 #import "content/lit_review.typ" as lit
 #import "content/method.typ" as meth
+#import "content/bom.typ" as bom
+#import "content/time.typ" as time
 
 // FORMAT SETUP
 #set text(font: "cambria")
@@ -66,28 +68,31 @@ A team consisting of the individuals listed below solely prepared the work submi
 
 //2 LITERATURE
 = Literature Review
-== Standards and Codes
+== UL Standards
 #lit.standards
-
+== Fuel and Air Standards
 #lit.fuel_air
-== Related Works
-
+== Safety Critical Programming Standards
+#lit.programming
+== Analysis
+#lit.analysis
 //3 METHODS
 = Methodology
-== Design Concept 1
+== Design Concepts
+=== Basic Design: "Modular Table and Data Collection"
 #meth.design1
-== Design Concept 2
+=== Design 2: "Basic + PID Loop and Predictive Outputs"
 #meth.design2
-== Design Concept 3
+=== Design 3: "Basic + PID Loop, Preheat Barrier, and Thermocouples"
 #meth.design3
-== Concept Selection on Target Specifications
-#meth.conceptTarget
-== Concept Selection on Customer Needs
-#meth.conceptCustomer
+== Concept Selection
+#meth.concept
 == Proposed Prototype Design
 #meth.prototype
-== Breakdown of Work into Specific Tasks
-== Organization of Work and Timeline
-== Breakdown of Responsibilities Among Team Members
-== Initial Cost Mode
+#pagebreak()
+== Timeline
+#time
+== Breakdown and Distribution of Work
+#meth.work
 == Bill of Materials
+#bom

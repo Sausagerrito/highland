@@ -12,30 +12,19 @@
 2-3 type K thermocouples rated to ~1300°C would be used in this design as well. This would allow the system to detect when the burner has reached the desired temperature and automatically move the preheat barrier out of the way. Additional thermocouples would be placed on the hot and cold sides of the sample for data logging and to feed data into the PID control loop to maintain a steady flame temperature. This concept also utilizes adjustable modules that would allow for greater test adaptability and an automated data collection system.
 ]
 
-#let conceptTarget = [
-  Based on the given target specifications, which call for a burner to reliably achieve and hold a 1200°C flame, have a sample holder that can fit a 200x200 mm piece of composite, and software that can receive data in real-time from a microcontroller, the concept that best fits the target specifications is Design Concept 3. By using a PID loop, preheat barrier, and thermocouples, the target specifications can reliably be achieved while also providing incredibly accurate data due to the use of thermocouples. Moreover, by utilizing a preheat barrier, it can be assured that the torch is only being used on the test composite when a target temperature has been reached. The instant exposure to a high temperature instead of a slowly rising temperature will also more closely resemble the effects of thermal runaway . Even though this design is more expensive than the other design concepts, the additional cost will result in quality improvements to the data collected.
+#let concept = [
+Based on the given target specifications, which call for a burner to reliably achieve and hold a 1200°C flame, have a sample holder that can fit a 200x200 mm piece of composite, and software that can receive data in real-time from a microcontroller, the concept that best fits the target specifications is Design Concept 3. By using a PID loop, preheat barrier, and thermocouples, the target specifications can reliably be achieved while also providing incredibly accurate data due to the use of thermocouples. Moreover, by utilizing a preheat barrier, it can be assured that the torch is only being used on the test composite when a target temperature has been reached. The instant exposure to a high temperature instead of a slowly rising temperature will also more closely resemble the effects of thermal runaway . Even though this design is more expensive than the other design concepts, the additional cost will result in quality improvements to the data collected.
 ]
 
-#let conceptCustomer = [
-  
-]
 
 #let prototype = [
-  
+  The proposed prototype we decided on was concept 3, involving the modular table, data collection, PID Loop, preheat barrier, and thermocouples.
 ]
 
-#let breakdown = [
+#let timeline = [
   
-]
+] 
 
-#let organization = [
-  
-]
-
-#let costModel = [
-  
-]
-
-#let bom = [
-  
+#let work = [
+  The project is segmented into technical tasks with respective duties for each team member in preparation for development. Matthew Coeling, Ethan Grentz, and Robert Alm will be responsible for the PID Loop and System Wiring, collaboratively designing, integrating, and constructing the control system with emphasis on functionality and wire organization. Connor Bendele will oversee microcontroller setup and hardware integration, including programming, hardware compatibility verification, and coordinating with Robert to enable software integration. Robert Alm will also handle software development, tasked with creating the desktop application, version control, and system testing and validation guidance. Sam Hass and Elijah Dawson will be the project leads for Fuel System and Fixture Design. Sam will manage CAD modeling, physical assembly, and coordination with Highland Plastics for the team. Elijah will be involved in design and assembly tasks and perform flow rate calculations.
 ]
