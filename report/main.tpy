@@ -1,0 +1,93 @@
+// IMPORTS
+#import "content/intro.typ" as intro
+#import "content/lit_review.typ" as lit
+#import "content/method.typ" as meth
+
+// FORMAT SETUP
+#set text(font: "cambria")
+#set par(first-line-indent: 2em)
+
+// VARIABLES
+#let title = "Highland Plastics: Thermal Performance Evaluation Report"
+#let robert = "Alm, R."
+#let sam = "Hass, S."
+#let connor = "Bendele, C."
+#let ethan = "Grentz, E."
+#let matthew = "Coeling, M."
+#let eli = "Dawson, E."
+#let class = "EGR 489WI Senior Design Project"
+
+// PARAGRAPHS
+#let decree = [
+A PROJECT REPORT\ PREPARED IN PARTIAL FULFILLMENT OF THE\ REQUIREMENT FOR THE DEGREE OF\ BACHELOR OF SCIENCE\ IN\ ENGINEERING TECHNOLOGY
+]
+#let ethics = [
+A team consisting of the individuals listed below solely prepared the work submitted in this report and it is original. Excerpts from others’ work have been clearly identified, their work acknowledged within the text and listed in the list of references. All of the engineering drawings, computer programs, formulations, design work, prototype development and testing reported in this document are also original and prepared by the same team of students. 
+  ]
+
+// TITLE PAGE
+#align(center + horizon)[
+  #image("watermark.png", width: 5cm)
+
+  #text(16pt, class)
+  
+  #decree
+  
+  #text(20pt, strong(title))
+  
+  #robert #sam #connor #ethan #matthew #eli
+]
+#pagebreak()
+
+= Ethics Statement and Signatures
+#ethics
+#pagebreak()
+
+#set heading(numbering: "1.1")
+#outline()
+#pagebreak()
+
+//1 REPORT BEGINS
+= Introduction
+== Project Overview
+#intro.project_overview
+== Customers
+#intro.customers
+== Constraints
+#intro.constraints
+== Stakeholders
+#intro.stakeholders
+== Project Goals
+#intro.project_goals
+== Customer Needs
+#intro.customer_needs
+== Design Targets
+#intro.design_targets
+
+//2 LITERATURE
+= Literature Review
+== Standards and Codes
+#lit.standards
+
+#lit.fuel_air
+== Related Works
+
+//3 METHODS
+= Methodology
+== Design Concept 1
+#meth.design1
+== Design Concept 2
+#meth.design2
+== Design Concept 3
+#meth.design3
+== Concept Selection on Target Specifications
+#meth.conceptTarget
+== Concept Selection on Customer Needs
+#meth.conceptCustomer
+== Proposed Prototype Design
+#meth.prototype
+== Breakdown of Work into Specific Tasks
+== Organization of Work and Timeline
+== Breakdown of Responsibilities Among Team Members
+== Initial Cost Mode
+== Bill of Materials
