@@ -8,16 +8,17 @@
 // FORMAT SETUP
 #set text(font: "cambria")
 #set par(first-line-indent: 2em)
+#set par(justify: true)
 
 // VARIABLES
-#let title = "Highland Plastics: Thermal Performance Evaluation Report"
+#let title = smallcaps[Highland Plastics: Thermal Performance\ Evaluation Report]
 #let robert = "Alm, R."
 #let sam = "Hass, S."
 #let connor = "Bendele, C."
 #let ethan = "Grentz, E."
 #let matthew = "Coeling, M."
 #let eli = "Dawson, E."
-#let class = "EGR 489WI Senior Design Project"
+#let class = smallcaps[EGR 489WI Senior Design Project]
 
 // PARAGRAPHS
 #let decree = [
@@ -38,14 +39,17 @@ A team consisting of the individuals listed below solely prepared the work submi
   #text(20pt, strong(title))
   
   #robert #sam #connor #ethan #matthew #eli
+
+  Faculty Advisor: Dr. Mohamed Awad
 ]
 #pagebreak()
 
+#show heading: smallcaps
 = Ethics Statement and Signatures
 #ethics
 #pagebreak()
 
-#set heading(numbering: "1.1")
+#set heading(numbering: "1.1.")
 #outline()
 #pagebreak()
 
@@ -94,5 +98,7 @@ A team consisting of the individuals listed below solely prepared the work submi
 #time
 == Breakdown and Distribution of Work
 #meth.work
+#set par(justify: false)
+
 == Bill of Materials
 #bom
