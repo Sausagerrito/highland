@@ -1,9 +1,0 @@
-[package]
-name = "unogui"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
-eframe = "0.32.3"
-serde = "1.0.228"
-serialport = "4.7.3"
