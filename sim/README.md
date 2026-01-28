@@ -2,7 +2,7 @@
 
 The idea here is to create a simulation that can pretend to be sensor data for when we don't have access to the actual thermocouples.
 
-
+WARNING: You have to change the USB address in main to match that of the port your Arduino is connected to. The exact syntax may very between Windows, MacOS and Linux.
 
 To run it you just type
 ```zsh
