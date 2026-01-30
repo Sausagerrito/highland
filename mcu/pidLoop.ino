@@ -1,9 +1,7 @@
 #include <QuickPID.h>
 
 //Pins
-const int preheat_led = 13;
-const int heat_led = 11;
-const int idle_led = 12;
+const int heatOutput = 11;
 
 //PID Params
 float Kp = 40.0;
@@ -28,18 +26,21 @@ unsigned long lastDebugTime = 0;
 const unsigned long sampleTime = 50;
 const unsigned long debugInterval = 250;
 
-int heatLedPWM = 0;
+unsigned long helpPause = 0;
+const unsigned long helpPauseDuration = 8000;
+
+int heatPWM = 0;
 
 void writeHeatPWM(int value) {
-  heatLedPWM = constrain(value, 0, 255);
-  analogWrite(heat_led, heatLedPWM);
+  heatPWM = constrain(value, 0, 255);
+  analogWrite(heatOutput, heatPWM);
 }
 
 //Temp sensor
 float readTemperature() {
   static float simulatedTemp = 0.0;
   float ambient = 0.0;
-  float heating = (heatLedPWM / 255.0) * 40.0;
+  float heating = (heatPWM / 255.0) * 40.0;
   float cooling = (simulatedTemp - ambient) * 0.005;
 
   simulatedTemp += heating - cooling;
@@ -48,9 +49,7 @@ float readTemperature() {
 }
 
 void setup() {
-  pinMode(preheat_led, OUTPUT);
-  pinMode(heat_led, OUTPUT);
-  pinMode(idle_led, OUTPUT);
+  pinMode(heatOutput, OUTPUT);
 
   Serial.begin(115200);
   while (!Serial && millis() < 2000) {
@@ -64,8 +63,6 @@ void setup() {
   myPID.SetMode(QuickPID::Control::manual);
   
   //Start in idle state
-  digitalWrite(idle_led, HIGH);
-  digitalWrite(preheat_led, LOW);
   writeHeatPWM(0);
 
   Serial.println("Commands: start, stop, set XXX, kp X, ki X, kd X, help");
@@ -132,6 +129,8 @@ void loop() {
     }
 
     else if (command == "help") {
+      helpPause = millis() + helpPauseDuration;
+      Serial.println("Terminal Paused for " + String(helpPauseDuration) + " milliseconds");
       Serial.println("Commands:");
       Serial.println("  start        - Start PID heating");
       Serial.println("  stop         - Stop heating");
@@ -173,7 +172,7 @@ void loop() {
   }
 
   //Debug output
-  if (now - lastDebugTime >= debugInterval) {
+  if (now - lastDebugTime >= debugInterval && now >= helpPause) {
     lastDebugTime = now;
     
     //Format output
@@ -223,10 +222,6 @@ void startHeating() {
   //Reset PID and switch to automatic
   myPID.Reset();
   myPID.SetMode(QuickPID::Control::automatic);
-  
-  //Update LED status
-  digitalWrite(idle_led, LOW);
-  digitalWrite(preheat_led, HIGH);  
 
   Serial.println("\n=== PID Heating Started ===");
   Serial.print("Target: ");
@@ -242,9 +237,6 @@ void stopHeating() {
   myPID.SetMode(QuickPID::Control::manual);
   writeHeatPWM(0);
   
-  digitalWrite(preheat_led, LOW);
-  digitalWrite(idle_led, HIGH);
-  
   Serial.println("\n=== Heating Stopped ===");
   Serial.println("Returned to idle state");
   Serial.println();
@@ -256,9 +248,6 @@ void emergencyStop() {
   
   myPID.SetMode(QuickPID::Control::manual);
   writeHeatPWM(0);
-  
-  digitalWrite(preheat_led, LOW);
-  digitalWrite(idle_led, HIGH);
   
   Serial.println("\n=== Emergency Stop ===");
   Serial.println("Temperature exceeded 1250°C");
