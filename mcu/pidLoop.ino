@@ -4,9 +4,9 @@
 const int heatOutput = 11;
 
 //PID Params
-float Kp = 40.0;
-float Ki = 3.0;
-float Kd = 40.0;
+float Kp = 15.0;
+float Ki = 0.5;
+float Kd = 20.0;
 
 //Temp Control
 float currentTemp = 0.0;
@@ -16,6 +16,10 @@ float controllerOutput = 0.0;
 //Fixed sample time
 QuickPID myPID(&currentTemp, &controllerOutput,
 &setpoint, Kp, Ki, Kd, QuickPID::Action::direct);
+
+//Output smoothing
+float smoothedOutput = 0.0;
+const float smoothingFactor = 0.3;
 
 //State variables
 bool idleActive = true;
@@ -31,20 +35,40 @@ const unsigned long helpPauseDuration = 8000;
 
 int heatPWM = 0;
 
+const float championMaxBTU = 775.0; //per minute
+const float championPropaneFlow = 8.0;
+const float championOxygenFlow = 40.0;
+const float btuToC = 0.0020;
+const float maxHeatingRate = championMaxBTU * btuToC;
+
+//Champion flame simulation
+const int centerFireMaxPWM = 100; //Center has 6 jets
+const int outerFireThreshold = 101; //Outer has 30 jets
+
 void writeHeatPWM(int value) {
-  heatPWM = constrain(value, 0, 255);
+  smoothedOutput = smoothedOutput * (1.0 - smoothingFactor) + value * smoothingFactor;
+  heatPWM = constrain((int)smoothedOutput, 0, 255);
   analogWrite(heatOutput, heatPWM);
 }
 
 //Temp sensor
 float readTemperature() {
   static float simulatedTemp = 0.0;
-  float ambient = 0.0;
-  float heating = (heatPWM / 255.0) * 40.0;
-  float cooling = (simulatedTemp - ambient) * 0.005;
-
+  float ambient = 25.0;
+  
+  //Chamption torch two flame simulation
+  float heating = 0.0;
+  if (heatPWM <= centerFireMaxPWM) {
+    heating = (heatPWM / (float)centerFireMaxPWM) * (maxHeatingRate * 0.3); //Center fire only
+  } else {
+    //Outer fire engaged
+    float centerFireHeat = maxHeatingRate * 0.3;  //Center fire at max
+    float outerFireHeat = ((heatPWM - centerFireMaxPWM) / (255.0 - centerFireMaxPWM)) * (maxHeatingRate * 0.7);
+    heating = centerFireHeat + outerFireHeat;
+  }  
+  float cooling = (simulatedTemp - ambient) * 0.001;
   simulatedTemp += heating - cooling;
-  simulatedTemp = constrain(simulatedTemp, 0.0, 1200.0);
+  simulatedTemp = constrain(simulatedTemp, 0.0, 1250.0);
   return simulatedTemp;
 }
 
@@ -63,10 +87,8 @@ void setup() {
   myPID.SetMode(QuickPID::Control::manual);
   
   //Start in idle state
-  writeHeatPWM(0);
+  writeHeatPWM(25);
 
-  Serial.println("Commands: start, stop, set XXX, kp X, ki X, kd X, help");
-  Serial.println("Current state: Idle");
   Serial.println();
 }
 
@@ -175,13 +197,19 @@ void loop() {
   if (now - lastDebugTime >= debugInterval && now >= helpPause) {
     lastDebugTime = now;
     
-    //Format output
     Serial.print("Temp: ");
-    if (currentTemp < 100) Serial.print(" ");
+    if (currentTemp < 1000) Serial.print(" ");
     Serial.print(currentTemp, 1);
     Serial.print("°C");
     
     if (heatActive) {
+      // Show which flame stage is active
+      if (heatPWM <= centerFireMaxPWM) {
+        Serial.print(" [Center Fire]");
+      } else {
+        Serial.print(" [Center+Outer]");
+      }
+      
       Serial.print(" / Target: ");
       Serial.print(setpoint, 0);
       Serial.print("°C");
@@ -192,10 +220,16 @@ void loop() {
       Serial.print(error, 1);
       Serial.print("°C)");
       
-      Serial.print(" | PID: ");
-      if (controllerOutput < 100) Serial.print(" ");
-      Serial.print((int)controllerOutput);
+      Serial.print(" | PWM: ");
+      if (heatPWM < 100) Serial.print(" ");
+      Serial.print(heatPWM);
       Serial.print("/255");
+      
+      //Estimated BTU output based on PWM
+      float estimatedBTU = (heatPWM / 255.0) * championMaxBTU;
+      Serial.print(" | ~");
+      Serial.print((int)estimatedBTU);
+      Serial.print(" BTU/min");
       
       //Show approximate heating rate
       static float lastTemp = currentTemp;
@@ -208,8 +242,6 @@ void loop() {
         lastTemp = currentTemp;
         lastCalcTime = now;
       }
-    } else {
-      Serial.print("");
     }
     Serial.println();
   }
