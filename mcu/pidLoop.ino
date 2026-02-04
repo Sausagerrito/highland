@@ -54,7 +54,7 @@ void writeHeatPWM(int value) {
 //Temp sensor
 float readTemperature() {
   static float simulatedTemp = 0.0;
-  float ambient = 25.0;
+  float ambient = 0.0;
   
   //Chamption torch two flame simulation
   float heating = 0.0;
@@ -87,8 +87,7 @@ void setup() {
   myPID.SetMode(QuickPID::Control::manual);
   
   //Start in idle state
-  writeHeatPWM(25);
-
+  writeHeatPWM(0);
   Serial.println();
 }
 
@@ -128,6 +127,7 @@ void loop() {
         }
       }
     }
+    
     else if (command.startsWith("kp ")) {
       Kp = command.substring(3).toFloat();
       myPID.SetTunings(Kp, Ki, Kd);
@@ -135,6 +135,7 @@ void loop() {
       Serial.print("Kp = ");
       Serial.println(Kp);
     }
+
       else if (command.startsWith("ki ")) {
       Ki = command.substring(3).toFloat();
       myPID.SetTunings(Kp, Ki, Kd);
@@ -142,6 +143,7 @@ void loop() {
       Serial.print("Ki = ");
       Serial.println(Ki);
     }
+
     else if (command.startsWith("kd ")) {
       Kd = command.substring(3).toFloat();
       myPID.SetTunings(Kp, Ki, Kd);
@@ -152,14 +154,14 @@ void loop() {
 
     else if (command == "help") {
       helpPause = millis() + helpPauseDuration;
-      Serial.println("Terminal Paused for " + String(helpPauseDuration) + " milliseconds");
+      Serial.println("Terminal Paused for " + String(helpPauseDuration / 1000) + " seconds");
       Serial.println("Commands:");
       Serial.println("  start        - Start PID heating");
       Serial.println("  stop         - Stop heating");
-      Serial.println("  set 180      - Set temperature target");
-      Serial.println("  kp 35        - Change P gain");
-      Serial.println("  ki 3         - Change I gain");
-      Serial.println("  kd 40        - Change D gain");
+      Serial.println("  set 1200      - Set temperature target");
+      Serial.println("  kp 15        - Change P gain");
+      Serial.println("  ki 0.5         - Change I gain");
+      Serial.println("  kd 20        - Change D gain");
       Serial.println("  help         - Show commands");
     }
     else if (command != "") {
@@ -203,7 +205,7 @@ void loop() {
     Serial.print("°C");
     
     if (heatActive) {
-      // Show which flame stage is active
+      //Show which flame stage is active
       if (heatPWM <= centerFireMaxPWM) {
         Serial.print(" [Center Fire]");
       } else {
@@ -225,7 +227,7 @@ void loop() {
       Serial.print(heatPWM);
       Serial.print("/255");
       
-      //Estimated BTU output based on PWM
+      //Estimated BTU output
       float estimatedBTU = (heatPWM / 255.0) * championMaxBTU;
       Serial.print(" | ~");
       Serial.print((int)estimatedBTU);
