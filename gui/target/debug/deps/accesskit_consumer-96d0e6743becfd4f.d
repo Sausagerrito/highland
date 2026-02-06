@@ -1,0 +1,10 @@
+/Users/rdodd/code/highland/gui/target/debug/deps/accesskit_consumer-96d0e6743becfd4f.d: /Users/rdodd/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/accesskit_consumer-0.31.0/src/lib.rs /Users/rdodd/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/accesskit_consumer-0.31.0/src/tree.rs /Users/rdodd/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/accesskit_consumer-0.31.0/src/node.rs /Users/rdodd/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/accesskit_consumer-0.31.0/src/filters.rs /Users/rdodd/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/accesskit_consumer-0.31.0/src/iterators.rs /Users/rdodd/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/accesskit_consumer-0.31.0/src/text.rs
+
+/Users/rdodd/code/highland/gui/target/debug/deps/libaccesskit_consumer-96d0e6743becfd4f.rmeta: /Users/rdodd/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/accesskit_consumer-0.31.0/src/lib.rs /Users/rdodd/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/accesskit_consumer-0.31.0/src/tree.rs /Users/rdodd/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/accesskit_consumer-0.31.0/src/node.rs /Users/rdodd/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/accesskit_consumer-0.31.0/src/filters.rs /Users/rdodd/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/accesskit_consumer-0.31.0/src/iterators.rs /Users/rdodd/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/accesskit_consumer-0.31.0/src/text.rs
+
+/Users/rdodd/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/accesskit_consumer-0.31.0/src/lib.rs:
+/Users/rdodd/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/accesskit_consumer-0.31.0/src/tree.rs:
+/Users/rdodd/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/accesskit_consumer-0.31.0/src/node.rs:
+/Users/rdodd/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/accesskit_consumer-0.31.0/src/filters.rs:
+/Users/rdodd/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/accesskit_consumer-0.31.0/src/iterators.rs:
+/Users/rdodd/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/accesskit_consumer-0.31.0/src/text.rs:
