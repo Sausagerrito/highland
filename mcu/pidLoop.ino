@@ -33,17 +33,20 @@ unsigned long actuatorStartTime = 0;
 const unsigned long actuatorMoveTime = 2000;
 float actuatorPosition = 0.0;
 
+//Debug variables
 unsigned long lastSampleTime = 0;
 unsigned long lastDebugTime = 0;
 const unsigned long sampleTime = 50;
 const unsigned long debugInterval = 250;
 
+//Console pause variables
 unsigned long helpPause = 0;
 unsigned long emergencyPause = 0;
 const unsigned long pauseDuration = 8000;
 
 int heatPWM = 0;
 
+//Champion torch variables
 const float championMaxBTU = 775.0; //per minute
 const float championPropaneFlow = 8.0;
 const float championOxygenFlow = 40.0;
@@ -111,10 +114,7 @@ float readTemperature() {
 void setup() {
   pinMode(heatOutput, OUTPUT);
 
-  Serial.begin(115200);
-  while (!Serial && millis() < 2000) {
-    //Wait for serial
-  }
+  Serial.begin(9600);
 
   myPID.SetProportionalMode(QuickPID::pMode::pOnError);
   myPID.SetDerivativeMode(QuickPID::dMode::dOnError);
