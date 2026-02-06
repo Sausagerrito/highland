@@ -38,7 +38,7 @@ int heatPWM = 0;
 const float championMaxBTU = 775.0; //per minute
 const float championPropaneFlow = 8.0;
 const float championOxygenFlow = 40.0;
-const float btuToC = 0.0020;
+const float btuToC = 0.00203;
 const float maxHeatingRate = championMaxBTU * btuToC;
 
 //Champion flame simulation
@@ -66,7 +66,8 @@ float readTemperature() {
     float outerFireHeat = ((heatPWM - centerFireMaxPWM) / (255.0 - centerFireMaxPWM)) * (maxHeatingRate * 0.7);
     heating = centerFireHeat + outerFireHeat;
   }  
-  float cooling = (simulatedTemp - ambient) * 0.001;
+  float coolingCoeff = (heatPWM == 0) ? 0.005 : 0.001;
+  float cooling = (simulatedTemp - ambient) * coolingCoeff;
   simulatedTemp += heating - cooling;
   simulatedTemp = constrain(simulatedTemp, 0.0, 1250.0);
   return simulatedTemp;
