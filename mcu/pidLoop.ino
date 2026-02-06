@@ -24,6 +24,14 @@ const float smoothingFactor = 0.3;
 //State variables
 bool idleActive = true;
 bool heatActive = false;
+bool setpointReached = false;
+
+//Linear actuator variables
+bool actuatorMoving = false;
+bool actuatorAtIdle = true;
+unsigned long actuatorStartTime = 0;
+const unsigned long actuatorMoveTime = 2000;
+float actuatorPosition = 0.0;
 
 unsigned long lastSampleTime = 0;
 unsigned long lastDebugTime = 0;
@@ -31,7 +39,8 @@ const unsigned long sampleTime = 50;
 const unsigned long debugInterval = 250;
 
 unsigned long helpPause = 0;
-const unsigned long helpPauseDuration = 8000;
+unsigned long emergencyPause = 0;
+const unsigned long pauseDuration = 8000;
 
 int heatPWM = 0;
 
@@ -49,6 +58,32 @@ void writeHeatPWM(int value) {
   smoothedOutput = smoothedOutput * (1.0 - smoothingFactor) + value * smoothingFactor;
   heatPWM = constrain((int)smoothedOutput, 0, 255);
   analogWrite(heatOutput, heatPWM);
+}
+
+//Linear actuator simulation
+void updateActuator() {
+  if (!actuatorMoving) return;
+
+  unsigned long elapsed = millis() - actuatorStartTime;
+  if (elapsed >= actuatorMoveTime) {
+    actuatorMoving = false;
+    actuatorPosition = actuatorAtIdle ? 0.0 : 100.0;
+  } else {
+    float progress = (float)elapsed / actuatorMoveTime;
+    actuatorPosition = actuatorAtIdle ? progress * 100.0 : 100.0 - (progress * 100.0);
+  }
+}
+
+void moveActuatorToIdle() {
+  actuatorMoving = true;
+  actuatorAtIdle = true;
+  actuatorStartTime = millis();
+}
+
+void moveActuatorAway() {
+  actuatorMoving = true;
+  actuatorAtIdle = false;
+  actuatorStartTime = millis();
 }
 
 //Temp sensor
@@ -69,7 +104,7 @@ float readTemperature() {
   float coolingCoeff = (heatPWM == 0) ? 0.005 : 0.001;
   float cooling = (simulatedTemp - ambient) * coolingCoeff;
   simulatedTemp += heating - cooling;
-  simulatedTemp = constrain(simulatedTemp, 0.0, 1250.0);
+  simulatedTemp = constrain(simulatedTemp, 0.0, 9999.0);
   return simulatedTemp;
 }
 
@@ -89,6 +124,8 @@ void setup() {
   
   //Start in idle state
   writeHeatPWM(0);
+  actuatorAtIdle = true;
+  actuatorPosition = 0.0;
   Serial.println();
 }
 
@@ -108,17 +145,18 @@ void loop() {
         Serial.println("Already running");
       }
     }
-        else if (command == "stop") {
+    else if (command == "stop") {
       if (heatActive) {
         stopHeating();
       } else {
         Serial.println("Already stopped");
       }
     }
-      else if (command.startsWith("set ")) {
+    else if (command.startsWith("set ")) {
       float newSetpoint = command.substring(4).toFloat();
       if (newSetpoint >= 0 && newSetpoint <= 1250) {
         setpoint = newSetpoint;
+        setpointReached = false;
         Serial.print("Target: ");
         Serial.print(setpoint);
         Serial.println("°C");
@@ -137,7 +175,7 @@ void loop() {
       Serial.println(Kp);
     }
 
-      else if (command.startsWith("ki ")) {
+    else if (command.startsWith("ki ")) {
       Ki = command.substring(3).toFloat();
       myPID.SetTunings(Kp, Ki, Kd);
       myPID.Reset(); 
@@ -154,8 +192,8 @@ void loop() {
     }
 
     else if (command == "help") {
-      helpPause = millis() + helpPauseDuration;
-      Serial.println("Terminal Paused for " + String(helpPauseDuration / 1000) + " seconds");
+      helpPause = millis() + pauseDuration;
+      Serial.println("Terminal Paused for " + String(pauseDuration / 1000) + " Seconds");
       Serial.println("Commands:");
       Serial.println("  start        - Start PID heating");
       Serial.println("  stop         - Stop heating");
@@ -172,12 +210,20 @@ void loop() {
 
   unsigned long now = millis();
   
+  updateActuator();
+  
   //Run temp control at fixed intervals
   if (now - lastSampleTime >= sampleTime) {
     lastSampleTime = now;
     
     //Read temp
     currentTemp = readTemperature();
+    
+    //Check setpoint reached
+    if (heatActive && !setpointReached && currentTemp >= setpoint - 2.0) {
+      setpointReached = true;
+      moveActuatorAway();
+    }
     
     //Safety limit
     if (currentTemp > 1251.0) {
@@ -222,6 +268,17 @@ void loop() {
       if (error >= 0) Serial.print("+");
       Serial.print(error, 1);
       Serial.print("°C)");
+
+      //Actuator status
+      if (actuatorMoving) {
+        Serial.print(" | Heat Shield: Moving ");
+        Serial.print(actuatorAtIdle ? "to Idle " : "to Engaged ");
+        Serial.print((int)actuatorPosition);
+        Serial.print("%");
+      } else {
+        Serial.print(" | Heat Shield: ");
+        Serial.print(actuatorAtIdle ? "Idle" : "Engaged");
+      }
       
       Serial.print(" | PWM: ");
       if (heatPWM < 100) Serial.print(" ");
@@ -245,6 +302,17 @@ void loop() {
         lastTemp = currentTemp;
         lastCalcTime = now;
       }
+    } else {
+      //Show shield status when not heating
+      if (actuatorMoving) {
+        Serial.print(" | Heat Shield: Moving ");
+        Serial.print(actuatorAtIdle ? "to Idle " : "to Engaged ");
+        Serial.print((int)actuatorPosition);
+        Serial.print("%");
+      } else {
+        Serial.print(" | Heat Shield: ");
+        Serial.print(actuatorAtIdle ? "Idle" : "Engaged");
+      }
     }
     Serial.println();
   }
@@ -253,6 +321,7 @@ void loop() {
 void startHeating() {
   idleActive = false;
   heatActive = true;
+  setpointReached = false;
   
   //Reset PID and switch to automatic
   myPID.Reset();
@@ -272,6 +341,8 @@ void stopHeating() {
   myPID.SetMode(QuickPID::Control::manual);
   writeHeatPWM(0);
   
+  moveActuatorToIdle();
+  
   Serial.println("\n=== Heating Stopped ===");
   Serial.println("Returned to idle state");
   Serial.println();
@@ -283,8 +354,12 @@ void emergencyStop() {
   
   myPID.SetMode(QuickPID::Control::manual);
   writeHeatPWM(0);
-  
+
+  moveActuatorToIdle();
+
+  helpPause = millis() + pauseDuration;
   Serial.println("\n=== Emergency Stop ===");
+  Serial.println("Terminal Paused for " + String(pauseDuration / 1000) + " Seconds");
   Serial.println("Temperature exceeded 1250°C");
   Serial.println("System reset to idle state");
 }
