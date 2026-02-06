@@ -130,6 +130,9 @@ void setup() {
 }
 
 void loop() {
+  Serial.print(currentTemp, 2);
+  Serial.println();
+    
   if (Serial.available()) {
     String command = Serial.readStringUntil('\n');
     command.replace("\r", "");
