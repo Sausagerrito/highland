@@ -25,6 +25,7 @@ const float smoothingFactor = 0.3;
 bool idleActive = true;
 bool heatActive = false;
 bool setpointReached = false;
+bool coolingActive = false;
 
 //Linear actuator variables
 bool actuatorMoving = false;
@@ -39,11 +40,6 @@ unsigned long lastDebugTime = 0;
 const unsigned long sampleTime = 50;
 const unsigned long debugInterval = 250;
 
-//Console pause variables
-unsigned long helpPause = 0;
-unsigned long emergencyPause = 0;
-const unsigned long pauseDuration = 8000;
-
 int heatPWM = 0;
 
 //Champion torch variables
@@ -56,6 +52,24 @@ const float maxHeatingRate = championMaxBTU * btuToC;
 //Champion flame simulation
 const int centerFireMaxPWM = 100; //Center has 6 jets
 const int outerFireThreshold = 101; //Outer has 30 jets
+
+String getMachineState() {
+  if (heatActive) {
+    return currentTemp >= setpoint - 2.0 ? "heat" : "warming";
+  } else if (coolingActive) {
+    return "cooling";
+  } else {
+    return "idle";
+  }
+}
+
+String getShieldStatus() {
+  if (actuatorMoving) {
+    return actuatorAtIdle ? "moving_to_idle" : "moving_to_engaged";
+  } else {
+    return actuatorAtIdle ? "idle" : "engaged";
+  }
+}
 
 void writeHeatPWM(int value) {
   smoothedOutput = smoothedOutput * (1.0 - smoothingFactor) + value * smoothingFactor;
@@ -126,89 +140,29 @@ void setup() {
   writeHeatPWM(0);
   actuatorAtIdle = true;
   actuatorPosition = 0.0;
-  // Serial.println();
 }
 
 void loop() {
+  Serial.println(currentTemp, 2);
+  Serial.println(getMachineState());
+  Serial.println(getShieldStatus());
+
   delay(1000);
-  Serial.print(currentTemp, 2);
-  Serial.println();
-    
+
   if (Serial.available()) {
     String command = Serial.readStringUntil('\n');
     command.replace("\r", "");
     command.trim();
 
-    // Serial.print("> ");
-    // Serial.println(command);
-
     if (command == "start") {
       if (idleActive && !heatActive) {
         startHeating();
-      } else {
-        // Serial.println("Already running");
       }
     }
     else if (command == "stop") {
       if (heatActive) {
         stopHeating();
-      } else {
-        // Serial.println("Already stopped");
       }
-    }
-    else if (command.startsWith("set ")) {
-      float newSetpoint = command.substring(4).toFloat();
-      if (newSetpoint >= 0 && newSetpoint <= 1250) {
-        setpoint = newSetpoint;
-        setpointReached = false;
-        // Serial.print("Target: ");
-        // Serial.print(setpoint);
-        // Serial.println("°C");
-
-        if (heatActive) {
-          myPID.Reset();
-        }
-      }
-    }
-    
-    else if (command.startsWith("kp ")) {
-      Kp = command.substring(3).toFloat();
-      myPID.SetTunings(Kp, Ki, Kd);
-      myPID.Reset();
-      // Serial.print("Kp = ");
-      // Serial.println(Kp);
-    }
-
-    else if (command.startsWith("ki ")) {
-      Ki = command.substring(3).toFloat();
-      myPID.SetTunings(Kp, Ki, Kd);
-      myPID.Reset(); 
-      // Serial.print("Ki = ");
-      // Serial.println(Ki);
-    }
-
-    else if (command.startsWith("kd ")) {
-      Kd = command.substring(3).toFloat();
-      myPID.SetTunings(Kp, Ki, Kd);
-      myPID.Reset();
-    //   Serial.print("Kd = ");
-    //   Serial.println(Kd);
-    // }
-
-    // else if (command == "help") {
-    //   helpPause = millis() + pauseDuration;
-    //   Serial.println("Terminal Paused for " + String(pauseDuration / 1000) + " Seconds");
-    //   Serial.println("Commands:");
-    //   Serial.println("  start        - Start PID heating");
-    //   Serial.println("  stop         - Stop heating");
-    //   Serial.println("  set 1200      - Set temperature target");
-    //   Serial.println("  kp 15        - Change P gain");
-    //   Serial.println("  ki 0.5         - Change I gain");
-    //   Serial.println("  kd 20        - Change D gain");
-    //   Serial.println("  help         - Show commands");
-    // }
-    // else if (command != "") {
-    //   Serial.println("Unknown command. Type 'help' for list.");
     }
   }
 
@@ -235,6 +189,12 @@ void loop() {
       return;
     }
     
+    //Check if cooling should transition to idle
+    if (coolingActive && currentTemp <= 0.1) {
+      coolingActive = false;
+      idleActive = true;
+    }
+    
     //State machine
     if (heatActive) {
       myPID.Compute();
@@ -244,124 +204,42 @@ void loop() {
       //No heating in idle
       writeHeatPWM(0);
     }
-  }
-
-  //Debug output
-  if (now - lastDebugTime >= debugInterval && now >= helpPause) {
-    lastDebugTime = now;
-    
-    // Serial.print("Temp: ");
-    // if (currentTemp < 1000) Serial.print(" ");
-    // Serial.print(currentTemp, 1);
-    // Serial.print("°C");
-    
-    if (heatActive) {
-      //Show which flame stage is active
-      // if (heatPWM <= centerFireMaxPWM) {
-      //   Serial.print(" [Center Fire]");
-      // } else {
-      //   Serial.print(" [Center+Outer]");
-      // }
-      
-      // Serial.print(" / Target: ");
-      // Serial.print(setpoint, 0);
-      // Serial.print("°C");
-      
-      float error = currentTemp - setpoint;
-      // Serial.print(" (");
-      // if (error >= 0) Serial.print("+");
-      // Serial.print(error, 1);
-      // Serial.print("°C)");
-
-      //Actuator status
-      // if (actuatorMoving) {
-      //   Serial.print(" | Heat Shield: Moving ");
-      //   Serial.print(actuatorAtIdle ? "to Idle " : "to Engaged ");
-      //   Serial.print((int)actuatorPosition);
-      //   Serial.print("%");
-      // } else {
-      //   Serial.print(" | Heat Shield: ");
-      //   Serial.print(actuatorAtIdle ? "Idle" : "Engaged");
-      // }
-      
-      // Serial.print(" | PWM: ");
-      // if (heatPWM < 100) Serial.print(" ");
-      // Serial.print(heatPWM);
-      //Estimated BTU output
-      float estimatedBTU = (heatPWM / 255.0) * championMaxBTU;
-      // Serial.print(" | ~");
-      // Serial.print((int)estimatedBTU);
-      // Serial.print(" BTU/min");
-      
-      //Show approximate heating rate
-      static float lastTemp = currentTemp;
-      static unsigned long lastCalcTime = now;
-      if (now - lastCalcTime >= 1000) {
-        float rate = (currentTemp - lastTemp) / ((now - lastCalcTime) / 1000.0);
-        // Serial.print(" | Rate: ");
-        // Serial.print(rate, 1);
-        // Serial.print("°C/s");
-        lastTemp = currentTemp;
-        lastCalcTime = now;
-      }
-    } else {
-      // //Show shield status when not heating
-      // if (actuatorMoving) {
-      //   Serial.print(" | Heat Shield: Moving ");
-      //   Serial.print(actuatorAtIdle ? "to Idle " : "to Engaged ");
-      //   Serial.print((int)actuatorPosition);
-      //   Serial.print("%");
-      // } else {
-      //   Serial.print(" | Heat Shield: ");
-      //   Serial.print(actuatorAtIdle ? "Idle" : "Engaged");
-      // }
+    else if (coolingActive) {
+      //No heating while cooling
+      writeHeatPWM(0);
     }
-    // Serial.println();
-  }
+  }  
 }
 
 void startHeating() {
   idleActive = false;
   heatActive = true;
+  coolingActive = false;
   setpointReached = false;
   
   //Reset PID and switch to automatic
   myPID.Reset();
   myPID.SetMode(QuickPID::Control::automatic);
-
-  // Serial.println("\n=== PID Heating Started ===");
-  // Serial.print("Target: ");
-  // Serial.print(setpoint);
-  // Serial.println("°C");
-  // Serial.println();
 }
 
 void stopHeating() {
   heatActive = false;
-  idleActive = true;
+  idleActive = false;
+  coolingActive = true;
   
   myPID.SetMode(QuickPID::Control::manual);
   writeHeatPWM(0);
   
   moveActuatorToIdle();
-  
-  // Serial.println("\n=== Heating Stopped ===");
-  // Serial.println("Returned to idle state");
-  // Serial.println();
 }
 
 void emergencyStop() {
   heatActive = false;
-  idleActive = true;
+  idleActive = false;
+  coolingActive = true;
   
   myPID.SetMode(QuickPID::Control::manual);
   writeHeatPWM(0);
 
   moveActuatorToIdle();
-
-  helpPause = millis() + pauseDuration;
-  // Serial.println("\n=== Emergency Stop ===");
-  // Serial.println("Terminal Paused for " + String(pauseDuration / 1000) + " Seconds");
-  // Serial.println("Temperature exceeded 1250°C");
-  // Serial.println("System reset to idle state");
 }
