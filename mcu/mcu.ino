@@ -4,9 +4,9 @@
 const int heatOutput = 11;
 
 //PID Params
-float Kp = 15.0;
-float Ki = 0.5;
-float Kd = 20.0;
+float Kp = 5.0;
+float Ki = 0.15;
+float Kd = 40.0;
 
 //Temp Control
 float currentTemp = 0.0;
@@ -19,7 +19,7 @@ QuickPID myPID(&currentTemp, &controllerOutput,
 
 //Output smoothing
 float smoothedOutput = 0.0;
-const float smoothingFactor = 0.3;
+const float smoothingFactor = 0.1;
 
 //State variables
 bool idleActive = true;
@@ -46,12 +46,14 @@ int heatPWM = 0;
 const float championMaxBTU = 775.0; //per minute
 const float championPropaneFlow = 8.0;
 const float championOxygenFlow = 40.0;
-const float btuToC = 0.00203;
+const float btuToC = 0.25;
 const float maxHeatingRate = championMaxBTU * btuToC;
 
 //Champion flame simulation
 const int centerFireMaxPWM = 100; //Center has 6 jets
 const int outerFireThreshold = 101; //Outer has 30 jets
+
+float lastHeatingInput = 0.0;
 
 String getMachineState() {
   if (heatActive) {
@@ -65,7 +67,7 @@ String getMachineState() {
 
 String getShieldStatus() {
   if (actuatorMoving) {
-    return actuatorAtIdle ? "moving_to_idle" : "moving_to_engaged";
+    return actuatorAtIdle ? "moving to idle" : "moving to engaged";
   } else {
     return actuatorAtIdle ? "idle" : "engaged";
   }
@@ -92,15 +94,19 @@ void updateActuator() {
 }
 
 void moveActuatorToIdle() {
-  actuatorMoving = true;
-  actuatorAtIdle = true;
-  actuatorStartTime = millis();
+  if (!actuatorAtIdle || (actuatorMoving && !actuatorAtIdle)) {
+    actuatorMoving = true;
+    actuatorAtIdle = true;
+    actuatorStartTime = millis();
+  }
 }
 
 void moveActuatorAway() {
-  actuatorMoving = true;
-  actuatorAtIdle = false;
-  actuatorStartTime = millis();
+  if (actuatorAtIdle || (actuatorMoving && actuatorAtIdle)) {
+    actuatorMoving = true;
+    actuatorAtIdle = false;
+    actuatorStartTime = millis();
+  }
 }
 
 //Temp sensor
@@ -114,14 +120,14 @@ float readTemperature() {
     heating = (heatPWM / (float)centerFireMaxPWM) * (maxHeatingRate * 0.3); //Center fire only
   } else {
     //Outer fire engaged
-    float centerFireHeat = maxHeatingRate * 0.3;  //Center fire at max
+    float centerFireHeat = maxHeatingRate * 0.5;  //Center fire at max
     float outerFireHeat = ((heatPWM - centerFireMaxPWM) / (255.0 - centerFireMaxPWM)) * (maxHeatingRate * 0.7);
     heating = centerFireHeat + outerFireHeat;
   }  
-  float coolingCoeff = (heatPWM == 0) ? 0.005 : 0.001;
-  float cooling = (simulatedTemp - ambient) * coolingCoeff;
-  simulatedTemp += heating - cooling;
-  simulatedTemp = constrain(simulatedTemp, 0.0, 9999.0);
+
+  float cooling = (simulatedTemp - ambient) * 0.04;
+  simulatedTemp += (heating - cooling) * (sampleTime / 1000.0);
+  simulatedTemp = constrain(simulatedTemp, 0.0, 1250.0);
   return simulatedTemp;
 }
 
@@ -143,11 +149,17 @@ void setup() {
 }
 
 void loop() {
-  Serial.println(currentTemp, 2);
-  Serial.println(getMachineState());
-  Serial.println(getShieldStatus());
+  static unsigned long lastSerialTime = 0;
+  if (millis() - lastSerialTime >= 1000) {
+    lastSerialTime = millis();
 
-  delay(1000);
+    Serial.print("Current Temp: ");
+    Serial.println(currentTemp, 2);
+    Serial.print("Setpoint Temp: ");
+    Serial.println(setpoint, 2);
+    Serial.println("Machine State: " + getMachineState());
+    Serial.println("Shield Status: " + getShieldStatus());
+  }
 
   if (Serial.available()) {
     String command = Serial.readStringUntil('\n');
@@ -155,13 +167,27 @@ void loop() {
     command.trim();
 
     if (command == "start") {
-      if (idleActive && !heatActive) {
+      if (!heatActive) {
         startHeating();
       }
     }
     else if (command == "stop") {
       if (heatActive) {
         stopHeating();
+      }
+    }
+
+    //Command for setpoint temp
+    else if (command.startsWith("set temp ")) {
+      String valueStr = command.substring(9);
+      valueStr.trim();
+      float newSetPoint = valueStr.toFloat();
+      if (newSetPoint > 0.0 && newSetPoint <= 1250.0) {
+        setpoint = newSetPoint;
+        Serial.println("Setpoint updated to: " + String(setpoint, 2));
+        myPID.Reset();
+      } else {
+        Serial.println("Invalid setpoint value");
       }
     }
   }
@@ -198,8 +224,18 @@ void loop() {
     //State machine
     if (heatActive) {
       myPID.Compute();
-      writeHeatPWM((int)controllerOutput);
+
+      //Braking to prevent overshoot
+      float finalOutput = controllerOutput;
+      if (currentTemp > (setpoint - 30.0) && currentTemp < setpoint) {
+        finalOutput = constrain(controllerOutput, 0, 100); //Cap power in final approach
+      }
+      if (currentTemp >= setpoint) {
+        finalOutput = 0; //Cut power once target reached
+      }
+      writeHeatPWM((int)finalOutput);
     }
+      
     else if (idleActive) {
       //No heating in idle
       writeHeatPWM(0);
