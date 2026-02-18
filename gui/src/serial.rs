@@ -46,3 +46,11 @@ pub fn start_serial_worker(port_path: &str) -> (Sender<String>, Receiver<(f64, f
 
     (tx_cmd, rx_data)
 }
+
+pub fn list_available_ports() -> Vec<String> {
+    serialport::available_ports()
+        .unwrap()
+        .into_iter()
+        .map(|p| p.port_name)
+        .collect()
+}

@@ -5,7 +5,12 @@ mod serial;
 use app::MyApp;
 
 fn main() {
-    let (tx_cmd, rx_data) = serial::start_serial_worker("/dev/cu.usbmodem190622201");
+    let ports = serial::list_available_ports();
+    for (i, name) in ports.iter().enumerate() {
+        println!("{}: {}", i, name);
+    }
+
+    let (tx_cmd, rx_data) = serial::start_serial_worker("/dev/cu.usbmodem1101");
 
     let native_options = eframe::NativeOptions::default();
     let _ = eframe::run_native(
