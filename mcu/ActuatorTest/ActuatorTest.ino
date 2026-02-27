@@ -18,6 +18,7 @@ void setup() {
   // Sensor pin setup
   pinMode(sensorPin, INPUT_PULLUP);
 
+  //Library HIGH/LOW
   stepper.setPinsInverted(true, false, false);
 
   // Set motor speed and acceleration
