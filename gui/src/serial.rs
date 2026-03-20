@@ -1,5 +1,5 @@
 use std::io::{BufRead, BufReader, Write, stdin, stdout};
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 use std::thread::spawn;
 use std::time::{Duration, Instant};
 
@@ -24,22 +24,42 @@ pub fn start_serial_worker(port_path: &str) -> (Sender<String>, Receiver<(f64, f
         let start_instant = Instant::now();
 
         loop {
-            if let Ok(cmd) = rx_cmd.try_recv() {
-                println!("Command '{cmd}' recieved.");
-                writer.write_all(cmd.as_bytes()).unwrap();
+            match rx_cmd.try_recv() {
+                Ok(cmd) => {
+                    println!("Command '{cmd}' recieved.");
+
+                    if let Err(e) = writer.write_all(cmd.as_bytes()) {
+                        eprintln!("Failed to write command to destination: {e}")
+                    }
+                }
+                Err(TryRecvError::Empty) => {}
+
+                Err(TryRecvError::Disconnected) => {
+                    println!("Channel disconnected.")
+                }
             }
 
             let mut buffer = String::new();
 
             println!("Reading buffer line.");
-            reader.read_line(&mut buffer).unwrap();
+            let read_result = reader.read_line(&mut buffer);
 
-            if !buffer.is_empty() {
-                let temperature = buffer.trim().parse::<f64>().unwrap();
-
-                let time_elapsed = start_instant.elapsed().as_secs_f64();
-
-                tx_data.send((time_elapsed, temperature)).unwrap();
+            match read_result {
+                Ok(0) => {
+                    break;
+                }
+                Err(e) => {
+                    eprintln!("{e}");
+                    break;
+                }
+                Ok(_) => {
+                    if !buffer.is_empty() {
+                        if let Ok(temperature) = buffer.trim().parse::<f64>() {
+                            let time_elapsed = start_instant.elapsed().as_secs_f64();
+                            tx_data.send((time_elapsed, temperature)).unwrap();
+                        }
+                    }
+                }
             }
         }
     });
@@ -58,14 +78,24 @@ pub fn get_serial_port() -> String {
         println!("{}: {}", i, name);
     }
 
-    println!("Choose port: ");
-    stdout().flush().unwrap();
+    loop {
+        println!("Choose port: ");
+        stdout().flush().unwrap();
 
-    let mut input = String::new();
+        let mut input = String::new();
+        stdin().read_line(&mut input).unwrap();
 
-    stdin().read_line(&mut input).unwrap();
+        let port_index: usize = match input.trim().parse() {
+            Ok(num) => num,
+            Err(_) => {
+                println!("Enter a valid number.");
+                continue;
+            }
+        };
 
-    let port_index: usize = input.trim().parse().unwrap();
-
-    ports[port_index].clone()
+        match ports.get(port_index) {
+            Some(name) => return name.clone(),
+            None => println!("Index {port_index} out of range"),
+        }
+    }
 }
