@@ -20,6 +20,7 @@ const int sensorPin = 7;
 
 AccelStepper stepper(1, stepPin, dirPin);
 
+// Max travel steps for required clearance
 const long maxSteps = 6100; 
 
 // Variable to track sensor state
@@ -38,6 +39,7 @@ void setup() {
   stepper.setMaxSpeed(maxSpeedSteps);     
     
   // Homing sequence
+  delay(1050); // Ensures smooth homing sequence
   stepper.setSpeed(-homingSpeedSteps); // Move Left toward sensor at homing speed
 
   // Move while sensor reads 0
