@@ -9,13 +9,10 @@ float Ki = 0.15;
 float Kd = 40.0;
 
 //Temp Control
-float currentTemp = 0.0;
-float setpoint = 1200.0;
+
 float controllerOutput = 0.0;
 
-//Fixed sample time
-QuickPID myPID(&currentTemp, &controllerOutput,
-&setpoint, Kp, Ki, Kd, QuickPID::Action::direct);
+
 
 //Output smoothing
 float smoothedOutput = 0.0;
@@ -26,6 +23,14 @@ bool idleActive = true;
 bool heatActive = false;
 bool setpointReached = false;
 bool coolingActive = false;
+float tcu1 = 0.0;
+float tcu2 = 0.0;
+float tcu3 = 0.0;
+float setpoint = 1200.0;
+
+//Fixed sample time
+QuickPID myPID(&tcu1, &controllerOutput,
+&setpoint, Kp, Ki, Kd, QuickPID::Action::direct);
 
 //Linear actuator variables
 bool actuatorMoving = false;
@@ -37,7 +42,7 @@ float actuatorPosition = 0.0;
 //Debug variables
 unsigned long lastSampleTime = 0;
 unsigned long lastDebugTime = 0;
-const unsigned long sampleTime = 50;
+const unsigned long sampleTime = 500;
 const unsigned long debugInterval = 250;
 
 int heatPWM = 0;
@@ -57,7 +62,7 @@ float lastHeatingInput = 0.0;
 
 String getMachineState() {
   if (heatActive) {
-    return currentTemp >= setpoint - 2.0 ? "heat" : "warming";
+    return tcu1 >= setpoint - 2.0 ? "heat" : "warming";
   } else if (coolingActive) {
     return "cooling";
   } else {
@@ -149,16 +154,18 @@ void setup() {
 }
 
 void loop() {
+
+
   static unsigned long lastSerialTime = 0;
   if (millis() - lastSerialTime >= 1000) {
     lastSerialTime = millis();
 
-    Serial.print("Current Temp: ");
-    Serial.println(currentTemp, 2);
-    Serial.print("Setpoint Temp: ");
-    Serial.println(setpoint, 2);
-    Serial.println("Machine State: " + getMachineState());
-    Serial.println("Shield Status: " + getShieldStatus());
+    // Serial.print("Current Temp: ");
+    // Serial.println(tcu1, 2);
+    // Serial.print("Setpoint Temp: ");
+    // Serial.println(setpoint, 2);
+    // Serial.println("Machine State: " + getMachineState());
+    // Serial.println("Shield Status: " + getShieldStatus());
   }
 
   if (Serial.available()) {
@@ -184,16 +191,15 @@ void loop() {
       float newSetPoint = valueStr.toFloat();
       if (newSetPoint > 0.0 && newSetPoint <= 1250.0) {
         setpoint = newSetPoint;
-        Serial.println("Setpoint updated to: " + String(setpoint, 2));
+        //Serial.println("Setpoint updated to: " + String(setpoint, 2));
         myPID.Reset();
       } else {
-        Serial.println("Invalid setpoint value");
+       //Serial.println("Invalid setpoint value");
       }
     }
   }
 
   unsigned long now = millis();
-  
   updateActuator();
   
   //Run temp control at fixed intervals
@@ -201,22 +207,31 @@ void loop() {
     lastSampleTime = now;
     
     //Read temp
-    currentTemp = readTemperature();
+    tcu1 = readTemperature();
+
+    Serial.print("TCU1=");
+    Serial.println(tcu1, 2);
+
+    Serial.print("TCU2=");
+    Serial.println(tcu2, 2);
+
+    Serial.print("TCU3=");  
+    Serial.println(tcu3, 2);
     
     //Check setpoint reached
-    if (heatActive && !setpointReached && currentTemp >= setpoint - 2.0) {
+    if (heatActive && !setpointReached && tcu1 >= setpoint - 2.0) {
       setpointReached = true;
       moveActuatorAway();
     }
     
     //Safety limit
-    if (currentTemp > 1251.0) {
+    if (tcu1 > 1251.0) {
       emergencyStop();
       return;
     }
     
     //Check if cooling should transition to idle
-    if (coolingActive && currentTemp <= 0.1) {
+    if (coolingActive && tcu1 <= 0.1) {
       coolingActive = false;
       idleActive = true;
     }
@@ -227,10 +242,10 @@ void loop() {
 
       //Braking to prevent overshoot
       float finalOutput = controllerOutput;
-      if (currentTemp > (setpoint - 30.0) && currentTemp < setpoint) {
+      if (tcu1 > (setpoint - 30.0) && tcu1 < setpoint) {
         finalOutput = constrain(controllerOutput, 0, 100); //Cap power in final approach
       }
-      if (currentTemp >= setpoint) {
+      if (tcu1 >= setpoint) {
         finalOutput = 0; //Cut power once target reached
       }
       writeHeatPWM((int)finalOutput);
