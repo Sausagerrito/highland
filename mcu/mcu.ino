@@ -2,10 +2,12 @@
 #include <AccelStepper.h>
 
 // Pins
-const int heatOutput = 11;
-const int stepPin = 3;
-const int dirPin = 4;
-const int sensorPin = 7;
+const int heatOutput = 11; // Ardunio pin - Needs changed
+const int directionPin = 14; 
+const int sensorPin = 7; // Ardunio pin - Needs changed
+const int pulsePin = 15;
+const int solenoidRelayPin = 11;
+const int sparkIgniterPin = 12;
 
 // --------------------------------------------------
 // Actuator Variables
@@ -25,7 +27,7 @@ const float stepsPerMM = (stepsPerRevolution * microstepping) / mmPerRevolution;
 const float maxSpeedSteps = targetSpeed_mm_s * stepsPerMM;
 const float homingSpeedSteps = homingSpeed_mm_s * stepsPerMM;
 
-AccelStepper stepper(1, stepPin, dirPin);
+AccelStepper stepper(1, pulsePin, directionPin);
 
 // Max travel steps for required clearance
 const long maxSteps = 6100;
