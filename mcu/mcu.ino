@@ -43,12 +43,15 @@ float Ki = 0.15;
 float Kd = 40.0;
 
 // Temp Control
-float currentTemp = 0.0;
-float setpoint = 1200.0;
+float t_shield = 0.0; 
+float t_hot = 0.0;    
+float t_cold = 0.0;   
+float setpoint = 1400.0;
+float testDuration = 60.0; 
 float controllerOutput = 0.0;
 
 // Fixed sample time
-QuickPID myPID(&currentTemp, &controllerOutput,
+QuickPID myPID(&t_shield, &controllerOutput,
 &setpoint, Kp, Ki, Kd, QuickPID::Action::direct);
 
 // Output smoothing
@@ -82,7 +85,7 @@ bool coolingActive = false;
 // Debug variables
 unsigned long lastSampleTime = 0;
 unsigned long lastDebugTime = 0;
-const unsigned long sampleTime = 50;
+const unsigned long sampleTime = 500;
 const unsigned long debugInterval = 250;
 
 // --------------------------------------------------
@@ -112,7 +115,7 @@ void setup() {
     stepper.runSpeed();
   }
 
-  // Step when actuator sensor reads 0 and set as absolute left (0)
+  // Step when actuator sensor reads 1 (triggered) and set as absolute left (0)
   stepper.setSpeed(0);
   stepper.setCurrentPosition(0);
 
@@ -127,51 +130,42 @@ void setup() {
 }
 
 void loop() {
-  static unsigned long lastSerialTime = 0;
-  if (millis() - lastSerialTime >= 1000) {
-    lastSerialTime = millis();
-
-    Serial.print("Current Temp: ");
-    Serial.println(currentTemp, 2);
-    Serial.print("Setpoint Temp: ");
-    Serial.println(setpoint, 2);
-    Serial.println("Machine State: " + getMachineState());
-    Serial.println("Shield Status: " + getShieldStatus());
-  }
-
+  // Command Parsing for Rust Integration
   if (Serial.available()) {
     String command = Serial.readStringUntil('\n');
     command.replace("\r", "");
     command.trim();
 
-    if (command == "start") {
+    if (command == "CMD:START" || command == "CMD:START_SKIP") {
       if (!heatActive) {
         startHeating();
       }
     }
-    else if (command == "stop") {
+    else if (command == "CMD:STOP") {
       if (heatActive) {
         stopHeating();
       }
     }
-
-    // Command for setpoint temp
-    else if (command.startsWith("set temp ")) {
+    else if (command == "CMD:HOME") {
+      moveActuatorToIdle();
+    }
+    else if (command.startsWith("SET_TEMP:")) {
       String valueStr = command.substring(9);
       valueStr.trim();
       float newSetPoint = valueStr.toFloat();
-      if (newSetPoint > 0.0 && newSetPoint <= 1250.0) {
+      if (newSetPoint > 0.0 && newSetPoint <= 1450.0) {
         setpoint = newSetPoint;
-        Serial.println("Setpoint updated to: " + String(setpoint, 2));
         myPID.Reset();
-      } else {
-        Serial.println("Invalid setpoint value");
       }
+    }
+    else if (command.startsWith("SET_TIME:")) {
+      String valueStr = command.substring(9);
+      valueStr.trim();
+      testDuration = valueStr.toFloat();
     }
   }
 
   unsigned long now = millis();
-  
   updateActuator();
   
   // Run temp control at fixed intervals
@@ -179,22 +173,32 @@ void loop() {
     lastSampleTime = now;
     
     // Read temp
-    currentTemp = readTemperature();
+    t_shield = readTemperature();
+    
+    // Telemetry output for Rust GUI
+    Serial.print("T_SHIELD=");
+    Serial.println(t_shield, 2);
+
+    Serial.print("T_HOT=");
+    Serial.println(t_hot, 2);
+
+    Serial.print("T_COLD=");  
+    Serial.println(t_cold, 2);
     
     // Check setpoint reached
-    if (heatActive && !setpointReached && currentTemp >= setpoint - 2.0) {
+    if (heatActive && !setpointReached && t_shield >= setpoint - 2.0) {
       setpointReached = true;
       moveActuatorAway();
     }
     
     // Safety limit
-    if (currentTemp > 1251.0) {
+    if (t_shield > 1451.0) {
       emergencyStop();
       return;
     }
     
     // Check if cooling should transition to idle
-    if (coolingActive && currentTemp <= 0.1) {
+    if (coolingActive && t_shield <= 0.1) {
       coolingActive = false;
       idleActive = true;
     }
@@ -205,10 +209,10 @@ void loop() {
 
       // Braking to prevent overshoot
       float finalOutput = controllerOutput;
-      if (currentTemp > (setpoint - 30.0) && currentTemp < setpoint) {
+      if (t_shield > (setpoint - 30.0) && t_shield < setpoint) {
         finalOutput = constrain(controllerOutput, 0, 100); // Cap power in final approach
       }
-      if (currentTemp >= setpoint) {
+      if (t_shield >= setpoint) {
         finalOutput = 0; // Cut power once target reached
       }
       writeHeatPWM((int)finalOutput);
@@ -305,7 +309,7 @@ void moveActuatorAway() {
 
 String getMachineState() {
   if (heatActive) {
-    return currentTemp >= setpoint - 2.0 ? "heat" : "warming";
+    return t_shield >= setpoint - 2.0 ? "heat" : "warming";
   } else if (coolingActive) {
     return "cooling";
   } else {
@@ -332,7 +336,7 @@ float readTemperature() {
   static float simulatedTemp = 0.0;
   float ambient = 0.0;
   
-  // Chamption torch two flame simulation
+  // Champion torch two flame simulation
   float heating = 0.0;
   if (heatPWM <= centerFireMaxPWM) {
     heating = (heatPWM / (float)centerFireMaxPWM) * (maxHeatingRate * 0.3); // Center fire only
@@ -345,6 +349,6 @@ float readTemperature() {
 
   float cooling = (simulatedTemp - ambient) * 0.04;
   simulatedTemp += (heating - cooling) * (sampleTime / 1000.0);
-  simulatedTemp = constrain(simulatedTemp, 0.0, 1250.0);
+  simulatedTemp = constrain(simulatedTemp, 0.0, 1450.0);
   return simulatedTemp;
 }
