@@ -41,6 +41,9 @@ struct AppState {
     peak_hot_temp: f64,
     peak_cold_temp: f64,
 
+    popup_message: Option<String>,
+    popup_timer: f64,
+
     history: Vec<Telemetry>,
     test_history: Vec<Telemetry>,
 
@@ -75,6 +78,8 @@ impl Default for AppState {
             current_state: SystemState::Idle,
             peak_hot_temp: 0.0,
             peak_cold_temp: 0.0,
+            popup_message: None,
+            popup_timer: 0.0,
             history: Vec::with_capacity(1000),
             test_history: Vec::with_capacity(80000),
             tx_cmd,
@@ -87,7 +92,6 @@ impl Default for AppState {
 fn setup_custom_fonts(ctx: &egui::Context) {
     let mut style = (*ctx.global_style()).clone();
 
-    // BUG FIX: Safely insert font sizes instead of wiping the entire style map!
     style.text_styles.insert(
         egui::TextStyle::Heading,
         egui::FontId::new(26.0, egui::FontFamily::Proportional),
@@ -126,6 +130,7 @@ fn setup_custom_fonts(ctx: &egui::Context) {
     ctx.set_fonts(fonts);
 }
 
+// --- Main ---
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default().with_inner_size([1150.0, 800.0]),
@@ -149,7 +154,7 @@ fn main() -> eframe::Result<()> {
         loop {
             while let Ok(raw_cmd) = rx_cmd.try_recv() {
                 let cmd = raw_cmd.trim();
-
+                // --- Command Matching ---
                 match cmd {
                     "CMD:HOME" => {
                         sim_state = SystemState::Homing;
@@ -183,6 +188,7 @@ fn main() -> eframe::Result<()> {
 
             sys_time += dt;
 
+            // --- Simulation Start ---
             match sim_state {
                 SystemState::Idle | SystemState::Ready => {
                     t_shield += (25.0 - t_shield) * 0.1 * dt;
@@ -223,7 +229,7 @@ fn main() -> eframe::Result<()> {
                     }
                 }
             }
-
+            // --- Sim End ---
             let _ = tx_telemetry.send(Telemetry {
                 sys_time,
                 test_timer,
@@ -252,6 +258,7 @@ fn main() -> eframe::Result<()> {
 }
 
 impl AppState {
+    // --- Test Name Incrementing ---
     fn bump_name(name: &str) -> String {
         if let Some(pos) = name.rfind('_') {
             let suffix = &name[pos + 1..];
@@ -262,6 +269,7 @@ impl AppState {
         format!("{}_01", name)
     }
 
+    // --- Exporting CSV on test completion or abortion ---
     fn auto_export_csv(&mut self) {
         if self.test_history.is_empty() {
             return;
@@ -287,6 +295,9 @@ impl AppState {
                 ]);
             }
             let _ = wtr.flush();
+
+            self.popup_message = Some(format!("Auto-saved: {}.csv", name_to_save));
+            self.popup_timer = 10.0;
         }
 
         self.test_name = Self::bump_name(&name_to_save);
@@ -302,6 +313,7 @@ impl AppState {
     }
 }
 
+// --- The app is drawn here ---
 impl eframe::App for AppState {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let window_size = self.graph_window.parse::<f64>().unwrap_or(60.0);
@@ -343,12 +355,11 @@ impl eframe::App for AppState {
         }
         ui.ctx().request_repaint();
 
-        // Using standard egui::SidePanel API
+        // --- Test Controls ---
         egui::Panel::left("control_panel")
             .resizable(true)
             .show_inside(ui, |ui| {
                 ui.add_space(10.0);
-
                 egui::Frame::group(ui.style()).show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     ui.heading(egui::RichText::new("Configuration").strong().size(18.0));
@@ -441,7 +452,6 @@ impl eframe::App for AppState {
                             egui::RichText::new("Export Directory:").color(egui::Color32::GRAY),
                         );
 
-                        // BUG FIX: .truncate() ensures long file paths don't stretch the left panel off the screen
                         ui.add(
                             egui::Label::new(
                                 egui::RichText::new(self.export_directory.display().to_string())
@@ -475,7 +485,7 @@ impl eframe::App for AppState {
 
                     ui.add_space(8.0);
 
-                    // Restored the Manual Export button just in case you still need it!
+                    // -- Manual Export Button ---
                     ui.add_enabled_ui(!self.is_recording && !self.test_history.is_empty(), |ui| {
                         if ui
                             .add_sized(
@@ -493,7 +503,6 @@ impl eframe::App for AppState {
         egui::CentralPanel::default().show_inside(ui, |ui| {
             ui.add_space(10.0);
 
-            // BUG FIX: Reverted to `ui.horizontal` to prevent the header from eating the entire vertical screen
             ui.horizontal(|ui| {
                 let heading_height = ui.text_style_height(&egui::TextStyle::Heading);
                 ui.add(
@@ -684,17 +693,48 @@ impl eframe::App for AppState {
                 ui.label("seconds");
             });
         });
+
+        if let Some(msg) = &self.popup_message {
+            if self.popup_timer > 0.0 {
+                self.popup_timer -= ui.input(|i| i.stable_dt) as f64;
+                egui::Window::new("CSV Export Toast")
+                    .title_bar(false)
+                    .resizable(false)
+                    .collapsible(false)
+                    .interactable(false)
+                    .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-20.0, -20.0))
+                    .frame(
+                        egui::Frame::popup(ui.style())
+                            .inner_margin(12.0)
+                            .shadow(egui::epaint::Shadow::NONE),
+                    )
+                    .show(ui.ctx(), |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                egui::RichText::new("✅")
+                                    .color(egui::Color32::GREEN)
+                                    .size(16.0),
+                            );
+                            ui.label(msg);
+                        });
+                    });
+
+                ui.ctx().request_repaint();
+            } else {
+                self.popup_message = None;
+            }
+        }
     }
 }
 
 impl AppState {
-    fn export_csv(&self) {
+    fn export_csv(&mut self) {
         if let Some(path) = rfd::FileDialog::new()
             .set_file_name(&format!("{}.csv", self.test_name))
             .add_filter("CSV", &["csv"])
             .save_file()
         {
-            let mut wtr = csv::Writer::from_path(path).expect("Failed to create CSV");
+            let mut wtr = csv::Writer::from_path(&path).expect("Failed to create CSV");
             wtr.write_record(["Test_Time(s)", "Shield(C)", "Hot(C)", "Cold(C)"])
                 .unwrap();
             for row in &self.test_history {
@@ -708,6 +748,12 @@ impl AppState {
                 .unwrap();
             }
             wtr.flush().unwrap();
+
+            self.popup_message = Some(format!(
+                "Exported to: {}",
+                path.file_name().unwrap_or_default().to_string_lossy()
+            ));
+            self.popup_timer = 10.0;
         }
     }
 }
