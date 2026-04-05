@@ -1,6 +1,6 @@
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use eframe::egui;
-use egui_plot::{Corner, HLine, Legend, Line, LineStyle, Plot, PlotPoints};
+use egui_plot::{Corner, Legend, Line, LineStyle, Plot, PlotPoints};
 use std::path::PathBuf;
 use std::thread;
 use std::time::Duration;
@@ -23,13 +23,15 @@ struct Telemetry {
     t_shield: f64,
     t_hot: f64,
     t_cold: f64,
+    target_temp: f64,
     state: SystemState,
 }
 
 struct AppState {
     test_name: String,
     export_directory: PathBuf,
-    target_temp: String,
+
+    curve_points: [f64; 5],
     test_duration: String,
     graph_window: String,
 
@@ -56,7 +58,8 @@ impl Default for AppState {
         let (tx_cmd, _) = unbounded();
         let (_, rx_telemetry) = unbounded();
 
-        let export_directory = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let export_directory =
+            std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/exports"));
         let mut test_name = "UL2596_Test_01".to_owned();
 
         let mut path = export_directory.join(format!("{}.csv", test_name));
@@ -68,7 +71,7 @@ impl Default for AppState {
         Self {
             test_name,
             export_directory,
-            target_temp: "1400".to_owned(),
+            curve_points: [1400.0; 5],
             test_duration: "600".to_owned(),
             graph_window: "30".to_owned(),
             is_recording: false,
@@ -133,7 +136,7 @@ fn setup_custom_fonts(ctx: &egui::Context) {
 // --- Main ---
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([1150.0, 800.0]),
+        viewport: egui::ViewportBuilder::default().with_inner_size([550.0, 800.0]),
         ..Default::default()
     };
 
@@ -142,7 +145,9 @@ fn main() -> eframe::Result<()> {
 
     thread::spawn(move || {
         let mut sim_state = SystemState::Idle;
-        let mut target_temp: f64 = 1400.0;
+        let mut temp_curve: [f64; 5] = [1400.0; 5];
+        let mut current_target;
+
         let mut test_duration: f64 = 60.0;
         let mut t_shield: f64 = 25.0;
         let mut t_hot: f64 = 25.0;
@@ -172,9 +177,12 @@ fn main() -> eframe::Result<()> {
                         sim_state = SystemState::Idle;
                         test_timer = 0.0;
                     }
-                    _ if cmd.starts_with("SET_TEMP:") => {
-                        if let Ok(val) = cmd["SET_TEMP:".len()..].parse::<f64>() {
-                            target_temp = val;
+                    _ if cmd.starts_with("SET_CURVE:") => {
+                        let vals = cmd["SET_CURVE:".len()..].split(',');
+                        for (i, val) in vals.enumerate().take(5) {
+                            if let Ok(v) = val.trim().parse::<f64>() {
+                                temp_curve[i] = v;
+                            }
                         }
                     }
                     _ if cmd.starts_with("SET_TIME:") => {
@@ -191,12 +199,14 @@ fn main() -> eframe::Result<()> {
             // --- Simulation Start ---
             match sim_state {
                 SystemState::Idle | SystemState::Ready => {
+                    current_target = temp_curve[0]; // Track 0% point when idle
                     t_shield += (25.0 - t_shield) * 0.1 * dt;
                     t_hot += (25.0 - t_hot) * 0.1 * dt;
                     t_cold += (25.0 - t_cold) * 0.05 * dt;
                     test_timer = 0.0;
                 }
                 SystemState::Homing => {
+                    current_target = temp_curve[0];
                     test_timer += dt;
                     t_shield += (25.0 - t_shield) * 0.1 * dt;
                     t_hot += (25.0 - t_hot) * 0.1 * dt;
@@ -208,19 +218,39 @@ fn main() -> eframe::Result<()> {
                     }
                 }
                 SystemState::Heating => {
-                    t_shield += (target_temp + 50.0 - t_shield) * 0.5 * dt;
+                    // Pre-heat target is strictly the 0% mark of the curve
+                    current_target = temp_curve[0];
+                    t_shield += (current_target + 50.0 - t_shield) * 0.5 * dt;
                     t_hot += (100.0 - t_hot) * 0.1 * dt;
                     t_cold += (30.0 - t_cold) * 0.05 * dt;
 
-                    if t_shield >= target_temp {
-                        t_shield = target_temp;
+                    // Ensure we don't accidentally float-skip if near target
+                    if t_shield >= current_target - 0.5 {
+                        t_shield = current_target;
                         sim_state = SystemState::Testing;
                     }
                 }
                 SystemState::Testing => {
                     test_timer += dt;
+
+                    // --- 5-Point Dynamic Curve Interpolation ---
+                    let progress = (test_timer / test_duration).clamp(0.0, 1.0);
+                    let scaled = progress * 4.0; // 4 segments for 5 points
+                    let idx = scaled.floor() as usize;
+                    let frac = scaled.fract();
+
+                    current_target = if idx < 4 {
+                        // Interpolate between the current and next curve point
+                        let p0 = temp_curve[idx];
+                        let p1 = temp_curve[idx + 1];
+                        p0 + (p1 - p0) * frac
+                    } else {
+                        // Final held target at 100%
+                        temp_curve[4]
+                    };
+
                     t_shield += (25.0 - t_shield) * 0.2 * dt;
-                    t_hot += (target_temp + 150.0 - t_hot) * 0.8 * dt;
+                    t_hot += (current_target + 150.0 - t_hot) * 0.8 * dt;
                     t_cold += (450.0 - t_cold) * 0.03 * dt;
 
                     if test_timer >= test_duration {
@@ -236,6 +266,7 @@ fn main() -> eframe::Result<()> {
                 t_shield,
                 t_hot,
                 t_cold,
+                target_temp: current_target,
                 state: sim_state.clone(),
             });
             thread::sleep(Duration::from_millis(100));
@@ -358,6 +389,7 @@ impl eframe::App for AppState {
         // --- Test Controls ---
         egui::Panel::left("control_panel")
             .resizable(true)
+            .max_size(300.0)
             .show_inside(ui, |ui| {
                 ui.add_space(10.0);
                 egui::Frame::group(ui.style()).show(ui, |ui| {
@@ -367,15 +399,45 @@ impl eframe::App for AppState {
                     ui.label("Test Name:");
                     ui.text_edit_singleline(&mut self.test_name);
                     ui.add_space(8.0);
+                    ui.label("Duration (s):");
+                    ui.text_edit_singleline(&mut self.test_duration);
+
+                    ui.add_space(20.0);
+
+                    // --- COMPACT EQ Curve Editor ---
                     ui.label(
-                        egui::RichText::new("Target Temp (°C):")
+                        egui::RichText::new("Target Temp Curve (°C):")
                             .color(egui::Color32::MAGENTA)
                             .strong(),
                     );
-                    ui.text_edit_singleline(&mut self.target_temp);
                     ui.add_space(8.0);
-                    ui.label("Duration (s):");
-                    ui.text_edit_singleline(&mut self.test_duration);
+
+                    ui.scope(|ui| {
+                        ui.spacing_mut().slider_width = 200.0;
+                        ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
+
+                        ui.columns(5, |columns| {
+                            for i in 0..5 {
+                                columns[i].vertical_centered(|ui| {
+                                    ui.add(
+                                        egui::Slider::new(&mut self.curve_points[i], 25.0..=2000.0)
+                                            .vertical()
+                                            .show_value(false)
+                                            .step_by(10.0),
+                                    );
+                                    ui.add_space(2.0);
+                                    ui.add(
+                                        egui::DragValue::new(&mut self.curve_points[i]).speed(5.0),
+                                    );
+                                    ui.label(
+                                        egui::RichText::new(format!("{}%", i * 25))
+                                            .small()
+                                            .color(egui::Color32::GRAY),
+                                    );
+                                });
+                            }
+                        });
+                    });
                 });
 
                 ui.add_space(20.0);
@@ -417,10 +479,19 @@ impl eframe::App for AppState {
                                     .join(format!("{}.csv", self.test_name));
                             }
 
-                            let _ = self.tx_cmd.send(format!("SET_TEMP:{}\n", self.target_temp));
+                            // Dispatch Configuration
                             let _ = self
                                 .tx_cmd
                                 .send(format!("SET_TIME:{}\n", self.test_duration));
+
+                            // Send Curve array payload
+                            let curve_str = self
+                                .curve_points
+                                .iter()
+                                .map(|v| v.to_string())
+                                .collect::<Vec<_>>()
+                                .join(",");
+                            let _ = self.tx_cmd.send(format!("SET_CURVE:{}\n", curve_str));
 
                             if self.skip_preheat {
                                 let _ = self.tx_cmd.send("CMD:START_SKIP\n".to_string());
@@ -564,6 +635,13 @@ impl eframe::App for AppState {
                 .map(|d| [d.sys_time, d.t_cold])
                 .collect();
 
+            let target_pts: PlotPoints = self
+                .history
+                .iter()
+                .filter(|d| d.sys_time >= start_time)
+                .map(|d| [d.sys_time, d.target_temp])
+                .collect();
+
             let shield_line = Line::new("Heat Shield", shield_pts)
                 .width(2.5)
                 .color(egui::Color32::ORANGE);
@@ -573,11 +651,9 @@ impl eframe::App for AppState {
             let cold_line = Line::new("Cold Side", cold_pts)
                 .width(2.5)
                 .color(egui::Color32::CYAN);
-
-            let parsed_target = self.target_temp.parse::<f64>().unwrap_or(1400.0);
-            let target_hline = HLine::new("Target Temp", parsed_target)
-                .color(egui::Color32::MAGENTA)
+            let target_line = Line::new("Target Temp", target_pts)
                 .width(2.0)
+                .color(egui::Color32::MAGENTA)
                 .style(LineStyle::Dashed { length: 5.0 });
 
             Plot::new("telemetry_plot")
@@ -587,7 +663,7 @@ impl eframe::App for AppState {
                 .include_x(start_time)
                 .include_x(latest_time)
                 .show(ui, |plot_ui| {
-                    plot_ui.hline(target_hline);
+                    plot_ui.line(target_line);
                     plot_ui.line(shield_line);
                     plot_ui.line(hot_line);
                     plot_ui.line(cold_line);
