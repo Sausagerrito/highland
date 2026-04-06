@@ -480,7 +480,7 @@ impl AppState {
 
             ui.label(
                 egui::RichText::new("Target Temp Curve (°C):")
-                    .color(egui::Color32::from_rgb(255, 0, 255))
+                    .color(egui::Color32::MAGENTA)
                     .strong(),
             );
             ui.add_space(8.0);
@@ -633,9 +633,7 @@ impl AppState {
                         (egui::Color32::DARK_GRAY, " SYSTEM STANDBY")
                     }
                     SystemState::Homing => (egui::Color32::LIGHT_RED, "󰓾 HOMING ACTUATOR"),
-                    SystemState::Heating => {
-                        (egui::Color32::from_rgb(255, 165, 0), " HEATING SHIELD")
-                    }
+                    SystemState::Heating => (egui::Color32::ORANGE, " HEATING SHIELD"),
                     SystemState::Testing => (egui::Color32::RED, " ACTIVE TEST"),
                 };
 
@@ -675,16 +673,16 @@ impl AppState {
 
         let shield_line = Line::new("Heat Shield", shield_pts)
             .width(2.5)
-            .color(egui::Color32::from_rgb(255, 165, 0));
+            .color(egui::Color32::ORANGE);
         let hot_line = Line::new("Hot Side", hot_pts)
             .width(2.5)
             .color(egui::Color32::RED);
         let cold_line = Line::new("Cold Side", cold_pts)
             .width(2.5)
-            .color(egui::Color32::from_rgb(0, 255, 255));
+            .color(egui::Color32::CYAN);
         let target_line = Line::new("Target Temp", target_pts)
             .width(2.0)
-            .color(egui::Color32::from_rgb(255, 0, 255))
+            .color(egui::Color32::MAGENTA)
             .style(LineStyle::Dashed { length: 5.0 });
 
         Plot::new("telemetry_plot")
@@ -722,7 +720,7 @@ impl AppState {
                             egui::RichText::new(format!("{:.1} °C", latest.t_shield))
                                 .size(28.0)
                                 .strong()
-                                .color(egui::Color32::from_rgb(255, 165, 0)),
+                                .color(egui::Color32::ORANGE),
                         );
                     });
                 });
@@ -752,7 +750,7 @@ impl AppState {
                             egui::RichText::new(format!("{:.1} °C", latest.t_cold))
                                 .size(28.0)
                                 .strong()
-                                .color(egui::Color32::from_rgb(0, 255, 255)),
+                                .color(egui::Color32::CYAN),
                         );
                         if self.peak_cold_temp > 0.0 {
                             ui.label(
