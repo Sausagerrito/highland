@@ -314,31 +314,3 @@ void sendTelemetry(unsigned long now) {
     case TESTING: Serial.println("TESTING"); break;
   }
 }
-
-// ============================================================================
-// SIMULATION ENVIRONMENT
-// ============================================================================
-void simulateTemperatures() {
-  float ambient = 25.0;
-  float heatingPower = (controllerOutput / 255.0) * 1500.0; 
-  
-  if (currentState == HEATING) {
-    t_shield += (heatingPower - (t_shield - ambient)) * 0.05;
-    t_hot += (heatingPower * 0.1 - (t_hot - ambient)) * 0.01; 
-    t_cold += (heatingPower * 0.05 - (t_cold - ambient)) * 0.005;
-  } 
-  else if (currentState == TESTING) {
-    t_shield -= (t_shield - ambient) * 0.05; 
-    t_hot += (heatingPower * 0.8 - (t_hot - ambient)) * 0.05;
-    t_cold += (heatingPower * 0.2 - (t_cold - ambient)) * 0.01;
-  } 
-  else {
-    t_shield -= (t_shield - ambient) * 0.05;
-    t_hot -= (t_hot - ambient) * 0.02;
-    t_cold -= (t_cold - ambient) * 0.005;
-  }
-  
-  t_shield = constrain(t_shield, ambient, 1600.0);
-  t_hot = constrain(t_hot, ambient, 1600.0);
-  t_cold = constrain(t_cold, ambient, 500.0);
-}
