@@ -56,8 +56,7 @@ float active_tcu_temp = 25.0;
 float current_setpoint = 1400.0; // Dynamically updated by the curve
 float tempCurve[5] = {1400.0, 1400.0, 1400.0, 1400.0, 1400.0}; // 0%, 25%, 50%, 75%, 100%
 
-QuickPID gasPID(&active_tcu_temp, &controllerOutput, &current_setpoint, Kp, Ki, Kd, 
-                QuickPID::pMode::pOnError, QuickPID::dMode::dOnError, QuickPID::Action::direct);
+QuickPID gasPID(&active_tcu_temp, &controllerOutput, &current_setpoint, Kp, Ki, Kd, QuickPID::Action::direct);
 
 // ============================================================================
 // SYSTEM STATE & TIMING
@@ -103,6 +102,8 @@ void setup() {
   gasPID.SetOutputLimits(0, max_pid_out);
   gasPID.SetSampleTimeUs(sampleDelay * 1000);
   gasPID.SetMode(QuickPID::Control::manual);
+  gasPID.SetProportionalMode(QuickPID::pMode::pOnError);
+  gasPID.SetDerivativeMode(QuickPID::dMode::dOnError);
 }
 
 // ============================================================================
@@ -235,12 +236,9 @@ void shutdownBurner() {
 
 void readTemperatures() {
   // --- REAL HARDWARE ---
-  // t_shield = thermoShield.readCelsius();
-  // t_hot = thermoHot.readCelsius();
-  // t_cold = thermoCold.readCelsius();
-
-  // --- SIMULATION ---
-  simulateTemperatures(); 
+   t_shield = thermoShield.readCelsius();
+   t_hot = thermoHot.readCelsius();
+   t_cold = thermoCold.readCelsius();
 
   // --- DYNAMIC PID SENSOR ROUTING ---
   if (currentState == TESTING) {
