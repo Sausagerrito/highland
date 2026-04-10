@@ -232,116 +232,68 @@ fn main() -> eframe::Result<()> {
     let (tx_telemetry, rx_telemetry) = unbounded::<Telemetry>();
 
     thread::spawn(move || {
-        let mut sim_state = SystemState::Idle;
-        let mut temp_curve: [f64; 5] = [1400.0; 5];
-        let mut current_target;
-        let mut test_duration: f64 = 600.0;
-        let mut t_shield: f64 = 25.0;
-        let mut t_hot: f64 = 25.0;
-        let mut t_cold: f64 = 25.0;
-        let mut sys_time: f64 = 0.0;
-        let mut test_timer: f64 = 0.0;
-        let dt: f64 = 0.1;
+        // NOTE: Change this path to match your actual OS serial port
+        // Windows example: "COM3"
+        // Mac/Linux example: "/dev/ttyACM0" or "/dev/cu.usbmodem..."
+        let port_name = "COM3";
+        let baud_rate = 115200; // Must match the Teensy's Serial.begin()
+
+        let mut port = serialport::new(port_name, baud_rate)
+            .timeout(Duration::from_millis(10))
+            .open()
+            .expect("Failed to open serial port. Is the Teensy plugged in and the port correct?");
+
+        let mut serial_buf: Vec<u8> = vec![0; 1000];
+        let mut line_buffer = String::new();
 
         loop {
+            // --------------------------------------------------------
+            // 1. SEND COMMANDS TO TEENSY
+            // --------------------------------------------------------
             while let Ok(cmd) = rx_cmd.try_recv() {
-                match cmd {
-                    AppCommand::Home => {
-                        sim_state = SystemState::Homing;
-                        test_timer = 0.0;
+                let msg = match cmd {
+                    AppCommand::Home => "CMD:HOME\n".to_string(),
+                    AppCommand::Start => "CMD:START\n".to_string(),
+                    AppCommand::StartSkip => "CMD:START_SKIP\n".to_string(),
+                    AppCommand::Stop => "CMD:STOP\n".to_string(),
+                    AppCommand::SetTime(time) => format!("SET_TIME:{}\n", time),
+                    AppCommand::SetCurve(c) => format!(
+                        "SET_CURVE:{:.1},{:.1},{:.1},{:.1},{:.1}\n",
+                        c[0], c[1], c[2], c[3], c[4]
+                    ),
+                };
+                let _ = port.write(msg.as_bytes());
+            }
+
+            // --------------------------------------------------------
+            // 2. READ TELEMETRY FROM TEENSY
+            // --------------------------------------------------------
+            match port.read(serial_buf.as_mut_slice()) {
+                Ok(t) => {
+                    if let Ok(s) = std::str::from_utf8(&serial_buf[..t]) {
+                        line_buffer.push_str(s);
                     }
-                    AppCommand::Start => {
-                        sim_state = SystemState::Heating;
-                        test_timer = 0.0;
+                }
+                Err(ref e) if e.kind() == std::io::ErrorKind::TimedOut => (),
+                Err(e) => eprintln!("Serial Read Error: {:?}", e),
+            }
+
+            // Process complete lines separated by '\n'
+            while let Some(pos) = line_buffer.find('\n') {
+                let line = line_buffer[..pos].trim().to_string();
+                line_buffer.drain(..=pos);
+
+                if line.starts_with("SYS_TIME:") {
+                    if let Some(telemetry) = parse_telemetry(&line) {
+                        let _ = tx_telemetry.send(telemetry);
                     }
-                    AppCommand::StartSkip => {
-                        sim_state = SystemState::Testing;
-                        test_timer = 0.0;
-                    }
-                    AppCommand::Stop => {
-                        sim_state = SystemState::Idle;
-                        test_timer = 0.0;
-                    }
-                    AppCommand::SetCurve(curve) => {
-                        temp_curve = curve;
-                    }
-                    AppCommand::SetTime(time) => {
-                        test_duration = time;
-                    }
+                } else {
+                    // Print debug/status messages from the Teensy that aren't telemetry
+                    println!("Teensy: {}", line);
                 }
             }
 
-            sys_time += dt;
-
-            // --- Simulation Logic ---
-            match sim_state {
-                SystemState::Idle | SystemState::Ready => {
-                    current_target = temp_curve[0];
-                    t_shield += (25.0 - t_shield) * 0.1 * dt;
-                    t_hot += (25.0 - t_hot) * 0.1 * dt;
-                    t_cold += (25.0 - t_cold) * 0.05 * dt;
-                    test_timer = 0.0;
-                }
-                SystemState::Homing => {
-                    current_target = temp_curve[0];
-                    test_timer += dt;
-                    t_shield += (25.0 - t_shield) * 0.1 * dt;
-                    t_hot += (25.0 - t_hot) * 0.1 * dt;
-                    t_cold += (25.0 - t_cold) * 0.05 * dt;
-
-                    if test_timer >= 2.0 {
-                        sim_state = SystemState::Ready;
-                        test_timer = 0.0;
-                    }
-                }
-                SystemState::Heating => {
-                    current_target = temp_curve[0];
-                    t_shield += (current_target + 50.0 - t_shield) * 0.5 * dt;
-                    t_hot += (100.0 - t_hot) * 0.1 * dt;
-                    t_cold += (30.0 - t_cold) * 0.05 * dt;
-
-                    if t_shield >= current_target - 0.5 {
-                        t_shield = current_target;
-                        sim_state = SystemState::Testing;
-                    }
-                }
-                SystemState::Testing => {
-                    test_timer += dt;
-
-                    let progress = (test_timer / test_duration).clamp(0.0, 1.0);
-                    let scaled = progress * 4.0;
-                    let idx = scaled.floor() as usize;
-                    let frac = scaled.fract();
-
-                    current_target = if idx < 4 {
-                        let p0 = temp_curve[idx];
-                        let p1 = temp_curve[idx + 1];
-                        p0 + (p1 - p0) * frac
-                    } else {
-                        temp_curve[4]
-                    };
-
-                    t_shield += (25.0 - t_shield) * 0.2 * dt;
-                    t_hot += (current_target + 150.0 - t_hot) * 0.8 * dt;
-                    t_cold += (450.0 - t_cold) * 0.03 * dt;
-
-                    if test_timer >= test_duration {
-                        sim_state = SystemState::Idle;
-                        test_timer = 0.0;
-                    }
-                }
-            }
-
-            let _ = tx_telemetry.send(Telemetry {
-                sys_time,
-                test_timer,
-                t_shield,
-                t_hot,
-                t_cold,
-                target_temp: current_target,
-                state: sim_state.clone(),
-            });
-            thread::sleep(Duration::from_millis(100));
+            thread::sleep(Duration::from_millis(10));
         }
     });
 
@@ -354,6 +306,52 @@ fn main() -> eframe::Result<()> {
             Ok(Box::new(AppState::new(cc, tx_cmd, rx_telemetry)))
         }),
     )
+}
+
+fn parse_telemetry(line: &str) -> Option<Telemetry> {
+    let mut sys_time = 0.0;
+    let mut test_timer = 0.0;
+    let mut t_shield = 0.0;
+    let mut t_hot = 0.0;
+    let mut t_cold = 0.0;
+    let mut target_temp = 0.0;
+    let mut state = SystemState::Idle;
+
+    let parts: Vec<&str> = line.split_whitespace().collect();
+
+    for part in parts {
+        let mut kv = part.split(':');
+        if let (Some(key), Some(value)) = (kv.next(), kv.next()) {
+            match key {
+                "SYS_TIME" => sys_time = value.parse().unwrap_or(0.0),
+                "TEST_TIMER" => test_timer = value.parse().unwrap_or(0.0),
+                "T_SHIELD" => t_shield = value.parse().unwrap_or(0.0),
+                "T_HOT" => t_hot = value.parse().unwrap_or(0.0),
+                "T_COLD" => t_cold = value.parse().unwrap_or(0.0),
+                "TARGET" => target_temp = value.parse().unwrap_or(0.0),
+                "STATE" => {
+                    state = match value {
+                        "HOMING" => SystemState::Homing,
+                        "READY" => SystemState::Ready,
+                        "HEATING" => SystemState::Heating,
+                        "TESTING" => SystemState::Testing,
+                        _ => SystemState::Idle,
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    Some(Telemetry {
+        sys_time,
+        test_timer,
+        t_shield,
+        t_hot,
+        t_cold,
+        target_temp,
+        state,
+    })
 }
 
 fn setup_custom_fonts(ctx: &egui::Context) {
