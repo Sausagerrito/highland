@@ -7,32 +7,28 @@
 // ============================================================================
 
 // --- Relays & Valves ---
-const int PIN_PWM_METHANE       = 2;  
-const int PIN_PWM_OXYGEN        = 11; 
-const int PIN_RELAY_SOLENOID    = 3;  
-const int PIN_RELAY_IGNITER     = 4;  
+const int PIN_PWM_METHANE       = 19;  
+const int PIN_PWM_OXYGEN        = 18; 
+const int PIN_RELAY_SOLENOID    = 10;  
+const int PIN_RELAY_IGNITER     = 1;  
 
 // --- Actuator / Stepper ---
-const int PIN_STEP              = 5;  
-const int PIN_DIR               = 6;  
+const int PIN_STEP              = 15;  
+const int PIN_DIR               = 14;  
 const int PIN_OPT_SENSOR        = 7;  
 
 // --- Thermocouples (Software SPI - Dedicated DO Pins) ---
-const int PIN_SCK_SHARED        = 13; 
-const int PIN_CS_SHIELD         = 8;  
-const int PIN_DO_SHIELD         = 12; 
-const int PIN_CS_HOT            = 9;  
-const int PIN_DO_HOT            = 24; 
-const int PIN_CS_COLD           = 10; 
-const int PIN_DO_COLD           = 25; 
+const int PIN_CS_SHIELD         = 39;  
+const int PIN_CS_HOT            = 40;  
+const int PIN_CS_COLD           = 41; 
 
 // ============================================================================
 // HARDWARE OBJECTS
 // ============================================================================
 
-Adafruit_MAX31855 thermoShield(PIN_SCK_SHARED, PIN_CS_SHIELD, PIN_DO_SHIELD);
-Adafruit_MAX31855 thermoHot(PIN_SCK_SHARED, PIN_CS_HOT, PIN_DO_HOT);
-Adafruit_MAX31855 thermoCold(PIN_SCK_SHARED, PIN_CS_COLD, PIN_DO_COLD);
+Adafruit_MAX31855 thermoShield(PIN_CS_SHIELD);
+Adafruit_MAX31855 thermoHot(PIN_CS_HOT);
+Adafruit_MAX31855 thermoCold(PIN_CS_COLD);
 
 AccelStepper stepper(AccelStepper::DRIVER, PIN_STEP, PIN_DIR);
 
@@ -60,12 +56,16 @@ void setup() {
   digitalWrite(PIN_RELAY_SOLENOID, LOW);
   digitalWrite(PIN_RELAY_IGNITER, LOW);
 
+
+  delay(500);
   // Initialize Sensors
   thermoShield.begin();
   thermoHot.begin();
   thermoCold.begin();
 
   // Initialize Stepper settings
+  stepper.setPinsInverted(true, true, false);
+  stepper.setMinPulseWidth(20);
   stepper.setMaxSpeed(4000.0);
   stepper.setAcceleration(2000.0);
 
