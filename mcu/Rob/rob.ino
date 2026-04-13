@@ -43,7 +43,7 @@ float controllerOutput = 0;
 
 float active_tcu_temp = 25;
 float current_setpoint = 1400.0;
-float tempCurve[5] = {1400,1400,1400,1400,1400};
+float tempCurve[5] = {1400, 1400, 1400, 1400, 1400};
 
 QuickPID gasPID(&active_tcu_temp, &controllerOutput, &current_setpoint, Kp, Ki, Kd, QuickPID::Action::direct);
 
@@ -80,8 +80,8 @@ void setup() {
 
   stepper.setPinsInverted(true, false, false);
   stepper.setMinPulseWidth(20);
-  stepper.setMaxSpeed(targetSpeed);
-  stepper.setAcceleration(8000);
+  
+  stepper.setMaxSpeed(targetSpeed); 
 
   gasPID.SetOutputLimits(0, 255);
   gasPID.SetMode(QuickPID::Control::manual);
@@ -93,15 +93,30 @@ void loop() {
 
   unsigned long now = millis();
 
-  // Always allow stepper motion
-  if (currentState != HOMING || homingPhase == MOVE_TO_HEATING) {
-    stepper.run();
+  if (currentState == HOMING && homingPhase == SEEK_SENSOR) {
+    
+    stepper.setSpeed(-homingSpeed); 
+    stepper.runSpeed();           
+
+    if (digitalRead(PIN_OPT_SENSOR) == HIGH) {
+      stepper.setSpeed(0);             
+      stepper.setCurrentPosition(0);   
+      stepper.moveTo(POS_HEATING);     
+      homingPhase = MOVE_TO_HEATING;
+    }
+  } else {
+    if (stepper.distanceToGo() > 0) {
+      stepper.setSpeed(targetSpeed); // Moving forward
+      stepper.runSpeed();
+    } else if (stepper.distanceToGo() < 0) {
+      stepper.setSpeed(-targetSpeed); // Moving backward
+      stepper.runSpeed();
+    }
   }
 
   if (now - lastSampleTime >= sampleDelay) {
     lastSampleTime = now;
 
-    //updateTargetCurve(now);
     readTemperatures();
     runStateMachine(now);
     sendTelemetry(now);
@@ -120,27 +135,12 @@ void runStateMachine(unsigned long now) {
     case HOMING:
       shutdownBurner();
 
-      if (homingPhase == SEEK_SENSOR) {
-        stepper.setSpeed(-homingSpeed);
-        stepper.runSpeed();
-
-        // SENSOR TRIGGER (adjust LOW/HIGH if needed)
-        if (digitalRead(PIN_OPT_SENSOR) == HIGH) {
-          stepper.setCurrentPosition(0);
-          stepper.moveTo(POS_HEATING);
-          homingPhase = MOVE_TO_HEATING;
-        }
-      }
-
-      else if (homingPhase == MOVE_TO_HEATING) {
-        stepper.run();
-
+      if (homingPhase == MOVE_TO_HEATING) {
         if (abs(stepper.currentPosition() - POS_HEATING) < POSITION_TOLERANCE) {
           currentState = READY;
           homingPhase = SEEK_SENSOR;
         }
       }
-
       break;
 
     case READY:
@@ -149,7 +149,7 @@ void runStateMachine(unsigned long now) {
       break;
 
     case HEATING:
-      stepper.moveTo(POS_HEATING);
+      stepper.moveTo(POS_HEATING); 
 
       digitalWrite(PIN_RELAY_SOLENOID, HIGH);
 
@@ -170,8 +170,7 @@ void runStateMachine(unsigned long now) {
       break;
 
     case TESTING:
-      stepper.moveTo(POS_TESTING);
-      stepper.run();
+      stepper.moveTo(POS_TESTING); 
 
       gasPID.Compute();
       applyGasOutputs();
@@ -260,14 +259,14 @@ void handleSerialCommands() {
 // ===================== TELEMETRY =====================
 void sendTelemetry(unsigned long now) {
   Serial.print("SYS_TIME:"); Serial.print(now / 1000.0, 2);
-  Serial.print(" TEST_TIMER:"); Serial.print(currentState == TESTING ? (now - testStartTime)/1000.0 : 0.0, 2);
+  Serial.print(" TEST_TIMER:"); Serial.print(currentState == TESTING ? (now - testStartTime) / 1000.0 : 0.0, 2);
   Serial.print(" T_SHIELD:"); Serial.print(t_shield, 2);
   Serial.print(" T_HOT:"); Serial.print(t_hot, 2);
   Serial.print(" T_COLD:"); Serial.print(t_cold, 2);
   Serial.print(" TARGET:"); Serial.print(current_setpoint, 2);
 
   Serial.print(" STATE:");
-  switch(currentState) {
+  switch (currentState) {
     case IDLE: Serial.println("IDLE"); break;
     case HOMING: Serial.println("HOMING"); break;
     case READY: Serial.println("READY"); break;
