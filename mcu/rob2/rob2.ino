@@ -48,7 +48,7 @@ void setup() {
   stepper.setAcceleration(8000);
 
   gasPID.SetOutputLimits(0, 255 / 6);
-  gasPID.SetMode(QuickPID::Control::automatic);
+  gasPID.SetMode(QuickPID::Control::manual);
 }
 
 void loop() {
@@ -87,6 +87,8 @@ void RX(){
     digitalWrite(IGN, HIGH);
     delay(SPRK);
     digitalWrite(IGN, LOW);
+
+    gasPID.SetMode(QuickPID::Control::automatic);
   }
 }
 
