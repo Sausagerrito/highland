@@ -94,7 +94,8 @@ void loop() {
   unsigned long now = millis();
 
   if (currentState == HOMING && homingPhase == SEEK_SENSOR) {
-    
+
+    delay(1050); // Ensures smooth homing sequence
     stepper.setSpeed(-homingSpeed); 
     stepper.runSpeed();           
 

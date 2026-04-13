@@ -124,7 +124,7 @@ void loop() {
 // ============================================================================
 void processCommand(String cmd) {
   // Only print command execution text if we aren't plotting (it messes up the graph's auto-scale)
-  if (!isPlotting || cmd == "PLOT OFF") {
+  if (!isPlotting || cmd == "PLOT OFF" || cmd == "RESET PLOT") {
     Serial.print("Executing: ");
     Serial.println(cmd);
   }
@@ -157,7 +157,7 @@ void processCommand(String cmd) {
     val = constrain(val, 0, 255);
     analogWrite(PIN_PWM_METHANE, val);
     if (!isPlotting) {
-      Serial.print("-> Methane PWM set to ");
+      Serial.print("Methane PWM set to ");
       Serial.println(val);
     }
   }
@@ -166,7 +166,18 @@ void processCommand(String cmd) {
     val = constrain(val, 0, 255);
     analogWrite(PIN_PWM_OXYGEN, val);
     if (!isPlotting) {
-      Serial.print("-> Oxygen PWM set to ");
+      Serial.print("Oxygen PWM set to ");
+      Serial.println(val);
+    }
+  }
+
+  else if (cmd.startsWith("GAS ")) {
+    int val = cmd. substring(4).toInt();
+    val = constrain(val, 0, 255);
+    analogWrite(PIN_PWM_OXYGEN, val);
+    analogWrite(PIN_PWM_METHANE, val);
+    if (!isPlotting) {
+      Serial.print("Gas PWM set to");
       Serial.println(val);
     }
   }
@@ -221,6 +232,15 @@ void processCommand(String cmd) {
     isPlotting = false;
     Serial.println("-> Plotting stopped.");
   }
+  else if (cmd == "RESET PLOT") {
+    // The standard Arduino Serial Plotter holds 500 points on screen.
+    // By rapidly printing 500 lines, we push the old messy data off the screen.
+    // We keep the Target at 1200 so the Y-axis scaling doesn't collapse to 0.
+    for (int i = 0; i < 500; i++) {
+      Serial.println("Target1200C:1200, Shield:0, Hot:0, Cold:0");
+    }
+    if (!isPlotting) Serial.println("-> Plot flushed.");
+  }
 
   // --- FALLBACK ---
   else {
@@ -238,12 +258,14 @@ void printHelp() {
   Serial.println("IGN OFF      : Turn Igniter Relay OFF");
   Serial.println("METHANE <val>: Set Methane PWM (0 to 255)");
   Serial.println("OXYGEN <val> : Set Oxygen PWM (0 to 255)");
+  Serial.println("GAS <val> : Set Gas PWM (0 to 255)");
   Serial.println("STEP <pos>   : Move stepper to absolute position (e.g., STEP 3000)");
   Serial.println("STOP         : Stop the stepper motor immediately");
   Serial.println("OPT          : Read optical sensor state");
   Serial.println("TEMP         : Single read of all three thermocouples (Text Format)");
   Serial.println("PLOT ON      : Start continuous data stream for Serial Plotter");
   Serial.println("PLOT OFF     : Stop continuous data stream");
+  Serial.println("RESET PLOT   : Clears the Serial Plotter by pushing old data off-screen");
   Serial.println("HELP         : Print this menu again");
   Serial.println("--------------------\n");
 }
