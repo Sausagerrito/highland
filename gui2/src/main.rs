@@ -17,6 +17,7 @@ enum AppCommand {
     MoveLeft,
     MoveRight,
     Start,
+    Stop, // ADDED: Stop command
 }
 
 #[derive(Clone, Debug)]
@@ -162,13 +163,15 @@ fn main() -> eframe::Result<()> {
     let (tx_telemetry, rx_telemetry) = unbounded::<Telemetry>();
 
     thread::spawn(move || {
-        let port_name = "/dev/cu.usbmodem190622201";
+        let port_name = "/dev/cu.usbmodem101"; // Make sure this matches your Uno
         let baud_rate = 115200;
 
         let mut port = serialport::new(port_name, baud_rate)
             .timeout(Duration::from_millis(10))
             .open()
-            .expect("Failed to open serial port. Is the Teensy plugged in and the port correct?");
+            .expect(
+                "Failed to open serial port. Is the Teensy/Uno plugged in and the port correct?",
+            );
 
         let mut serial_buf: Vec<u8> = vec![0; 1000];
         let mut line_buffer = String::new();
@@ -183,6 +186,7 @@ fn main() -> eframe::Result<()> {
                     AppCommand::MoveLeft => "CMD:HOME\n".to_string(),
                     AppCommand::MoveRight => "CMD:SHIELD\n".to_string(),
                     AppCommand::Start => "CMD:START\n".to_string(),
+                    AppCommand::Stop => "CMD:STOP\n".to_string(), // ADDED: Send stop over serial
                 };
                 let _ = port.write(msg.as_bytes());
             }
@@ -209,7 +213,7 @@ fn main() -> eframe::Result<()> {
                     telemetry.sys_time = app_start_time.elapsed().as_secs_f64();
                     let _ = tx_telemetry.send(telemetry);
                 } else {
-                    println!("Teensy: {}", line);
+                    println!("MCU: {}", line);
                 }
             }
 
@@ -381,16 +385,17 @@ impl AppState {
             ui.add_space(15.0);
 
             let start_btn_text = if self.is_recording {
-                "🔥 TEST IN PROGRESS..."
+                "⏹ STOP TEST" // UPDATED: Changed visual text
             } else {
                 "🔥 START TEST"
             };
             let start_btn_color = if self.is_recording {
-                egui::Color32::ORANGE
+                egui::Color32::RED // UPDATED: Make it red to indicate Stop
             } else {
                 egui::Color32::GREEN
             };
 
+            // UPDATED: Now functions as a toggle for Start and Stop
             if ui
                 .add_sized(
                     [ui.available_width(), 50.0],
@@ -401,12 +406,16 @@ impl AppState {
                     ),
                 )
                 .clicked()
-                && !self.is_recording
             {
-                self.is_recording = true;
-                self.test_history.clear();
-                self.test_start_offset = self.history.last().map(|d| d.sys_time).unwrap_or(0.0);
-                let _ = self.tx_cmd.send(AppCommand::Start);
+                if self.is_recording {
+                    self.is_recording = false;
+                    let _ = self.tx_cmd.send(AppCommand::Stop); // Fire STOP command
+                } else {
+                    self.is_recording = true;
+                    self.test_history.clear();
+                    self.test_start_offset = self.history.last().map(|d| d.sys_time).unwrap_or(0.0);
+                    let _ = self.tx_cmd.send(AppCommand::Start);
+                }
             }
         });
 
@@ -431,6 +440,7 @@ impl AppState {
                     .clicked()
                 {
                     self.is_recording = false;
+                    let _ = self.tx_cmd.send(AppCommand::Stop); // UPDATED: Also safely stops heating on save
                     self.export_csv();
                 }
             });

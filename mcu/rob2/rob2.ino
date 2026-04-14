@@ -6,7 +6,7 @@
 const int METH = 19, OX = 18;
 const int SOL = 10, IGN = 1;
 
-const int STEP = 15, DIR = 14, OPT = 7;
+const int STEP = 15, DIR = 14, OPT = 0;
 
 const int SHLD = 38, HOT = 40, COLD = 41;
 
@@ -42,7 +42,7 @@ void setup() {
   tHot.begin();
   tCold.begin();
 
-  stepper.setPinsInverted(true, false, false);
+  stepper.setPinsInverted(false, false, false);
   stepper.setMinPulseWidth(20);
   stepper.setMaxSpeed(SPEED);
   stepper.setAcceleration(8000);
@@ -75,7 +75,21 @@ void RX(){
   cmd.trim();
 
   if (cmd == "CMD:HOME") {
-    stepper.moveTo(0);
+    stepper.setSpeed(-3000);
+
+    int count = 0;
+
+    while (count < 10) {
+      stepper.runSpeed();
+
+      if (digitalRead(OPT) == HIGH) {
+        count++;
+      } else {
+        count = 0;
+      }
+    }
+    stepper.setCurrentPosition(0);
+
   }
 
   else if (cmd == "CMD:SHIELD") {

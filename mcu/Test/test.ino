@@ -15,7 +15,7 @@ const int PIN_RELAY_IGNITER     = 1;
 // --- Actuator / Stepper ---
 const int PIN_STEP              = 15;  
 const int PIN_DIR               = 14;  
-const int PIN_OPT_SENSOR        = 7;  
+const int PIN_OPT_SENSOR        = 0;  
 
 // --- Thermocouples (Software SPI - Dedicated DO Pins) ---
 const int PIN_CS_SHIELD         = 39;  

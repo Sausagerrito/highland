@@ -235,7 +235,7 @@ fn main() -> eframe::Result<()> {
         // NOTE: Change this path to match your actual OS serial port
         // Windows example: "COM3"
         // Mac/Linux example: "/dev/ttyACM0" or "/dev/cu.usbmodem..."
-        let port_name = "/dev/cu.usbmodem190622201";
+        let port_name = "/dev/cu.usbmodem101";
         let baud_rate = 115200; // Must match the Teensy's Serial.begin()
 
         let mut port = serialport::new(port_name, baud_rate)
