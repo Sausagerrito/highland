@@ -48,7 +48,7 @@ float tempCurve[5] = {1400, 1400, 1400, 1400, 1400};
 QuickPID gasPID(&active_tcu_temp, &controllerOutput, &current_setpoint, Kp, Ki, Kd, QuickPID::Action::direct);
 
 // ===================== STATE =====================
-enum SystemState { IDLE, HOMING, READY, HEATING, TESTING };
+enum SystemState { IDLE, HOMING, READY, HEATING, TESTING, ACT_REAL_WAIT, ACT_REAL_HOME };
 SystemState currentState = IDLE;
 
 enum HomingPhase { SEEK_SENSOR, MOVE_TO_HEATING };
@@ -94,30 +94,27 @@ void loop() {
   unsigned long now = millis();
 
   if (currentState == HOMING && homingPhase == SEEK_SENSOR) {
-
-    delay(1050); // Ensures smooth homing sequence
     stepper.setSpeed(-homingSpeed); 
-    stepper.runSpeed();           
+    stepper.runSpeed();
 
     if (digitalRead(PIN_OPT_SENSOR) == HIGH) {
       stepper.setSpeed(0);             
       stepper.setCurrentPosition(0);   
-      stepper.moveTo(POS_HEATING);     
-      homingPhase = MOVE_TO_HEATING;
+      stepper.moveTo(0);     
+      currentState = READY;
     }
   } else {
     if (stepper.distanceToGo() > 0) {
-      stepper.setSpeed(targetSpeed); // Moving forward
+      stepper.setSpeed(targetSpeed);
       stepper.runSpeed();
     } else if (stepper.distanceToGo() < 0) {
-      stepper.setSpeed(-targetSpeed); // Moving backward
+      stepper.setSpeed(-targetSpeed);
       stepper.runSpeed();
     }
   }
 
   if (now - lastSampleTime >= sampleDelay) {
     lastSampleTime = now;
-
     readTemperatures();
     runStateMachine(now);
     sendTelemetry(now);
@@ -135,7 +132,6 @@ void runStateMachine(unsigned long now) {
 
     case HOMING:
       shutdownBurner();
-
       if (homingPhase == MOVE_TO_HEATING) {
         if (abs(stepper.currentPosition() - POS_HEATING) < POSITION_TOLERANCE) {
           currentState = READY;
@@ -153,7 +149,6 @@ void runStateMachine(unsigned long now) {
       stepper.moveTo(POS_HEATING); 
 
       digitalWrite(PIN_RELAY_SOLENOID, HIGH);
-
       if (now - igniterStartTime < IGNITER_DUR)
         digitalWrite(PIN_RELAY_IGNITER, HIGH);
       else
@@ -180,6 +175,20 @@ void runStateMachine(unsigned long now) {
         currentState = IDLE;
       }
       break;
+
+    case ACT_REAL_WAIT:
+      stepper.moveTo(stepper.currentPosition()); 
+      if (t_shield >= 1200.0 || t_hot >= 1200.0 || t_cold >= 1200.0) {
+        currentState = ACT_REAL_HOME;
+      }
+      break;
+
+    case ACT_REAL_HOME:
+      stepper.moveTo(POS_HOME);
+      if (stepper.distanceToGo() == 0) {
+        currentState = IDLE;
+      }
+      break;
   }
 }
 
@@ -203,7 +212,8 @@ void readTemperatures() {
   t_hot = thermoHot.readCelsius();
   t_cold = thermoCold.readCelsius();
 
-  active_tcu_temp = (currentState == TESTING) ? t_hot : t_shield;
+  active_tcu_temp = (currentState == TESTING) ?
+    t_hot : t_shield;
 }
 
 // ===================== SERIAL =====================
@@ -214,8 +224,19 @@ void handleSerialCommands() {
   command.trim();
 
   if (command == "CMD:HOME") {
-    currentState = HOMING;
-    homingPhase = SEEK_SENSOR;
+    if (digitalRead(PIN_OPT_SENSOR) == HIGH) {
+      stepper.setCurrentPosition(0);
+      stepper.moveTo(0);
+      currentState = READY;
+    } else {
+      delay(1050);
+      currentState = HOMING;
+      homingPhase = SEEK_SENSOR;
+    }
+  }
+
+  else if (command == "CMD:ACTUATOR_REAL") {
+    currentState = ACT_REAL_WAIT;
   }
 
   else if (command == "CMD:START") {
@@ -260,7 +281,8 @@ void handleSerialCommands() {
 // ===================== TELEMETRY =====================
 void sendTelemetry(unsigned long now) {
   Serial.print("SYS_TIME:"); Serial.print(now / 1000.0, 2);
-  Serial.print(" TEST_TIMER:"); Serial.print(currentState == TESTING ? (now - testStartTime) / 1000.0 : 0.0, 2);
+  Serial.print(" TEST_TIMER:");
+  Serial.print(currentState == TESTING ? (now - testStartTime) / 1000.0 : 0.0, 2);
   Serial.print(" T_SHIELD:"); Serial.print(t_shield, 2);
   Serial.print(" T_HOT:"); Serial.print(t_hot, 2);
   Serial.print(" T_COLD:"); Serial.print(t_cold, 2);
@@ -273,5 +295,7 @@ void sendTelemetry(unsigned long now) {
     case READY: Serial.println("READY"); break;
     case HEATING: Serial.println("HEATING"); break;
     case TESTING: Serial.println("TESTING"); break;
+    case ACT_REAL_WAIT: Serial.println("ACT_REAL_WAIT"); break;
+    case ACT_REAL_HOME: Serial.println("ACT_REAL_HOME"); break;
   }
 }
