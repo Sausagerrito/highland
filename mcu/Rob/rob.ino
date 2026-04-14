@@ -4,270 +4,237 @@
 #include <SPI.h>
 
 // ===================== PINS =====================
-const int PIN_PWM_METHANE = 19;
-const int PIN_PWM_OXYGEN = 18;
-const int PIN_RELAY_SOLENOID = 10;
-const int PIN_RELAY_IGNITER = 1;
+const int METHANE_PWM = 19;
+const int OXYGEN_PWM = 18;
+const int SOLENOID_RELAY = 10;
+const int IGNITER_RELAY = 1;
 
-const int PIN_STEP = 15;
-const int PIN_DIR = 14;
-const int PIN_OPT_SENSOR = 7;
+const int STEPPER_STEP = 15;
+const int STEPPER_DIR = 14;
+const int OPTICAL_SENSOR = 0;
 
-const int PIN_CS_SHIELD = 38;
-const int PIN_CS_HOT = 40;
-const int PIN_CS_COLD = 41;
+const int CS_SHIELD = 38;
+const int CS_HOT = 40;
+const int CS_COLD = 41;
 
 // ===================== HARDWARE =====================
-Adafruit_MAX31855 thermoShield(PIN_CS_SHIELD);
-Adafruit_MAX31855 thermoHot(PIN_CS_HOT);
-Adafruit_MAX31855 thermoCold(PIN_CS_COLD);
+Adafruit_MAX31855 tcShield(CS_SHIELD);
+Adafruit_MAX31855 tcHot(CS_HOT);
+Adafruit_MAX31855 tcCold(CS_COLD);
 
-AccelStepper stepper(AccelStepper::DRIVER, PIN_STEP, PIN_DIR);
+AccelStepper stepper(AccelStepper::DRIVER, STEPPER_STEP, STEPPER_DIR);
 
 // ===================== CONSTANTS =====================
 const float targetSpeed = 3000.0;
 const float homingSpeed = 3000.0;
-
-const long POS_HOME = 0;
-const long POS_HEATING = 6100;
-const long POS_TESTING = 0;
-
-const float POSITION_TOLERANCE = 5;
-
-const float O2_METHANE_RATIO = 1.0;
+const long posHome = 0;
+const long posHeating = 6100;
+const float o2MethaneRatio = 6.0;
 
 // ===================== PID =====================
-float Kp = 5.0, Ki = 0.15, Kd = 40.0;
-float t_shield = 25, t_hot = 25, t_cold = 25;
-float controllerOutput = 0;
+float kp = 5.0, ki = 0.15, kd = 40.0;
+float tempShield = 25.0, tempHot = 25.0, tempCold = 25.0;
+float pidOutput = 0.0;
 
-float active_tcu_temp = 25;
-float current_setpoint = 1400.0;
-float tempCurve[5] = {1400, 1400, 1400, 1400, 1400};
+float activeTemp = 25.0;
+float targetTemp = 1000.0;
+float tempCurve[5] = {1000, 1000, 1000, 1000, 1000};
 
-QuickPID gasPID(&active_tcu_temp, &controllerOutput, &current_setpoint, Kp, Ki, Kd, QuickPID::Action::direct);
+QuickPID burnerPid(&activeTemp, &pidOutput, &targetTemp, kp, ki, kd, QuickPID::Action::direct);
 
 // ===================== STATE =====================
-enum SystemState { IDLE, HOMING, READY, HEATING, TESTING, ACT_REAL_WAIT, ACT_REAL_HOME };
-SystemState currentState = IDLE;
+enum SystemState { STATE_IDLE, STATE_HOMING, STATE_READY, STATE_HEATING };
+SystemState currentState = STATE_IDLE;
 
-enum HomingPhase { SEEK_SENSOR, MOVE_TO_HEATING };
-HomingPhase homingPhase = SEEK_SENSOR;
+enum HomingPhase { PHASE_SEEK, PHASE_MOVE };
+HomingPhase homingPhase = PHASE_SEEK;
+
+int sensorDebounce = 0;
+bool autoStartSequence = false;
 
 // ===================== TIMING =====================
-unsigned long lastSampleTime = 0;
-const unsigned long sampleDelay = 100;
+unsigned long lastSample = 0;
+const unsigned long sampleInterval = 250;
 
-float testDurationSec = 600;
-unsigned long testStartTime = 0;
-
-unsigned long igniterStartTime = 0;
-const unsigned long IGNITER_DUR = 3000;
+unsigned long igniterStart = 0;
+const unsigned long igniterDuration = 5000;
 
 // ===================== SETUP =====================
 void setup() {
   Serial.begin(115200);
 
-  pinMode(PIN_PWM_METHANE, OUTPUT);
-  pinMode(PIN_PWM_OXYGEN, OUTPUT);
-  pinMode(PIN_RELAY_SOLENOID, OUTPUT);
-  pinMode(PIN_RELAY_IGNITER, OUTPUT);
-  pinMode(PIN_OPT_SENSOR, INPUT_PULLUP);
+  pinMode(METHANE_PWM, OUTPUT);
+  pinMode(OXYGEN_PWM, OUTPUT);
+  pinMode(SOLENOID_RELAY, OUTPUT);
+  pinMode(IGNITER_RELAY, OUTPUT);
+  pinMode(OPTICAL_SENSOR, INPUT_PULLUP);
 
-  thermoShield.begin();
-  thermoHot.begin();
-  thermoCold.begin();
+  tcShield.begin();
+  tcHot.begin();
+  tcCold.begin();
 
-  stepper.setPinsInverted(true, false, false);
+  stepper.setPinsInverted(false, false, false);
   stepper.setMinPulseWidth(20);
-  
   stepper.setMaxSpeed(targetSpeed); 
+  stepper.setAcceleration(8000);
 
-  gasPID.SetOutputLimits(0, 255);
-  gasPID.SetMode(QuickPID::Control::manual);
+  burnerPid.SetOutputLimits(0, 255 / 6);
+  burnerPid.SetMode(QuickPID::Control::manual);
 }
 
 // ===================== LOOP =====================
 void loop() {
-  handleSerialCommands();
+  processSerial();
 
   unsigned long now = millis();
 
-  if (currentState == HOMING && homingPhase == SEEK_SENSOR) {
+  if (currentState == STATE_HOMING && homingPhase == PHASE_SEEK) {
     stepper.setSpeed(-homingSpeed); 
     stepper.runSpeed();
 
-    if (digitalRead(PIN_OPT_SENSOR) == HIGH) {
-      stepper.setSpeed(0);             
-      stepper.setCurrentPosition(0);   
-      stepper.moveTo(0);     
-      currentState = READY;
+    if (digitalRead(OPTICAL_SENSOR) == HIGH) {
+      sensorDebounce++;
+      if (sensorDebounce >= 10) {
+        stepper.setSpeed(0);             
+        stepper.setCurrentPosition(0);   
+        
+        if (autoStartSequence) {
+          stepper.moveTo(posHeating);
+        } else {
+          stepper.moveTo(0);
+        }
+        
+        currentState = STATE_READY;
+        sensorDebounce = 0;
+      }
+    } else {
+      sensorDebounce = 0;
     }
   } else {
-    if (stepper.distanceToGo() > 0) {
-      stepper.setSpeed(targetSpeed);
-      stepper.runSpeed();
-    } else if (stepper.distanceToGo() < 0) {
-      stepper.setSpeed(-targetSpeed);
-      stepper.runSpeed();
-    }
+    stepper.run(); 
   }
 
-  if (now - lastSampleTime >= sampleDelay) {
-    lastSampleTime = now;
-    readTemperatures();
-    runStateMachine(now);
-    sendTelemetry(now);
+  if (now - lastSample >= sampleInterval) {
+    lastSample = now;
+    readSensors();
+    updateState(now);
+    printTelemetry(now);
   }
 }
 
 // ===================== STATE MACHINE =====================
-void runStateMachine(unsigned long now) {
-
+void updateState(unsigned long now) {
   switch (currentState) {
-
-    case IDLE:
-      shutdownBurner();
+    case STATE_IDLE:
+      stopBurner();
       break;
 
-    case HOMING:
-      shutdownBurner();
-      if (homingPhase == MOVE_TO_HEATING) {
-        if (abs(stepper.currentPosition() - POS_HEATING) < POSITION_TOLERANCE) {
-          currentState = READY;
-          homingPhase = SEEK_SENSOR;
-        }
+    case STATE_HOMING:
+      stopBurner();
+      break;
+
+    case STATE_READY:
+      stopBurner();
+      stepper.moveTo(posHeating);
+      
+      if (autoStartSequence && stepper.distanceToGo() == 0) {
+        autoStartSequence = false;
+        currentState = STATE_HEATING;
+        igniterStart = now;
+        burnerPid.Reset();
       }
       break;
 
-    case READY:
-      shutdownBurner();
-      stepper.moveTo(POS_HEATING);
-      break;
+    case STATE_HEATING:
+      stepper.moveTo(posHeating); 
+      digitalWrite(SOLENOID_RELAY, HIGH);
+      
+      burnerPid.SetMode(QuickPID::Control::automatic);
+      burnerPid.Compute();
+      setValves();
 
-    case HEATING:
-      stepper.moveTo(POS_HEATING); 
-
-      digitalWrite(PIN_RELAY_SOLENOID, HIGH);
-      if (now - igniterStartTime < IGNITER_DUR)
-        digitalWrite(PIN_RELAY_IGNITER, HIGH);
-      else
-        digitalWrite(PIN_RELAY_IGNITER, LOW);
-
-      gasPID.SetMode(QuickPID::Control::automatic);
-      gasPID.Compute();
-      applyGasOutputs();
-
-      if (t_shield >= current_setpoint - 2.0) {
-        currentState = TESTING;
-        testStartTime = now;
-        gasPID.Reset();
-      }
-      break;
-
-    case TESTING:
-      stepper.moveTo(POS_TESTING); 
-
-      gasPID.Compute();
-      applyGasOutputs();
-
-      if ((now - testStartTime) / 1000.0 >= testDurationSec) {
-        currentState = IDLE;
-      }
-      break;
-
-    case ACT_REAL_WAIT:
-      stepper.moveTo(stepper.currentPosition()); 
-      if (t_shield >= 1200.0 || t_hot >= 1200.0 || t_cold >= 1200.0) {
-        currentState = ACT_REAL_HOME;
-      }
-      break;
-
-    case ACT_REAL_HOME:
-      stepper.moveTo(POS_HOME);
-      if (stepper.distanceToGo() == 0) {
-        currentState = IDLE;
+      unsigned long heatingTime = now - igniterStart;
+      
+      if (heatingTime < 2000) {
+        digitalWrite(IGNITER_RELAY, LOW);
+      } else if (heatingTime < 2000 + igniterDuration) {
+        digitalWrite(IGNITER_RELAY, HIGH);
+      } else {
+        digitalWrite(IGNITER_RELAY, LOW);
       }
       break;
   }
 }
 
 // ===================== HELPERS =====================
-void applyGasOutputs() {
-  analogWrite(PIN_PWM_METHANE, (int)controllerOutput);
-  analogWrite(PIN_PWM_OXYGEN, (int)(controllerOutput * O2_METHANE_RATIO));
+void setValves() {
+  analogWrite(METHANE_PWM, (int)pidOutput);
+  analogWrite(OXYGEN_PWM, (int)(pidOutput * o2MethaneRatio));
 }
 
-void shutdownBurner() {
-  gasPID.SetMode(QuickPID::Control::manual);
-  controllerOutput = 0;
-  analogWrite(PIN_PWM_METHANE, 0);
-  analogWrite(PIN_PWM_OXYGEN, 0);
-  digitalWrite(PIN_RELAY_SOLENOID, LOW);
-  digitalWrite(PIN_RELAY_IGNITER, LOW);
+void stopBurner() {
+  burnerPid.SetMode(QuickPID::Control::manual);
+  pidOutput = 0;
+  analogWrite(METHANE_PWM, 0);
+  analogWrite(OXYGEN_PWM, 0);
+  digitalWrite(SOLENOID_RELAY, LOW);
+  digitalWrite(IGNITER_RELAY, LOW);
 }
 
-void readTemperatures() {
-  t_shield = thermoShield.readCelsius();
-  t_hot = thermoHot.readCelsius();
-  t_cold = thermoCold.readCelsius();
-
-  active_tcu_temp = (currentState == TESTING) ?
-    t_hot : t_shield;
+void readSensors() {
+  tempShield = tcShield.readCelsius();
+  tempHot = tcHot.readCelsius();
+  tempCold = tcCold.readCelsius();
+  activeTemp = tempShield;
 }
 
 // ===================== SERIAL =====================
-void handleSerialCommands() {
+void processSerial() {
   if (!Serial.available()) return;
 
-  String command = Serial.readStringUntil('\n');
-  command.trim();
+  String cmd = Serial.readStringUntil('\n');
+  cmd.trim();
 
-  if (command == "CMD:HOME") {
-    if (digitalRead(PIN_OPT_SENSOR) == HIGH) {
+  if (cmd == "CMD:HOME") {
+    autoStartSequence = false;
+    if (digitalRead(OPTICAL_SENSOR) == HIGH) {
       stepper.setCurrentPosition(0);
       stepper.moveTo(0);
-      currentState = READY;
+      currentState = STATE_READY;
     } else {
       delay(1050);
-      currentState = HOMING;
-      homingPhase = SEEK_SENSOR;
+      currentState = STATE_HOMING;
+      homingPhase = PHASE_SEEK;
+      sensorDebounce = 0;
     }
   }
 
-  else if (command == "CMD:ACTUATOR_REAL") {
-    currentState = ACT_REAL_WAIT;
-  }
-
-  else if (command == "CMD:START") {
-    if (currentState == READY &&
-        abs(stepper.currentPosition() - POS_HEATING) < 10) {
-
-      currentState = HEATING;
-      igniterStartTime = millis();
-      gasPID.Reset();
+  else if (cmd == "CMD:START") {
+    autoStartSequence = true;
+    
+    if (digitalRead(OPTICAL_SENSOR) == HIGH) {
+      stepper.setCurrentPosition(0);
+      stepper.moveTo(posHeating);
+      currentState = STATE_READY;
+    } else {
+      currentState = STATE_HOMING;
+      homingPhase = PHASE_SEEK;
+      sensorDebounce = 0;
     }
   }
 
-  else if (command == "CMD:START_SKIP") {
-    currentState = TESTING;
-    testStartTime = millis();
-    igniterStartTime = millis();
+  else if (cmd == "CMD:STOP") {
+    autoStartSequence = false; 
+    currentState = STATE_IDLE;
+    stepper.moveTo(posHeating);
   }
 
-  else if (command == "CMD:STOP") {
-    currentState = IDLE;
-    stepper.moveTo(POS_HOME);
-  }
+  else if (cmd.startsWith("SET_CURVE:")) {
+    String values = cmd.substring(10);
 
-  else if (command.startsWith("SET_TIME:")) {
-    testDurationSec = command.substring(9).toFloat();
-  }
-
-  else if (command.startsWith("SET_CURVE:")) {
-    String values = command.substring(10);
     for (int i = 0; i < 5; i++) {
       int idx = values.indexOf(',');
+
       if (idx == -1) {
         tempCurve[i] = values.toFloat();
         break;
@@ -279,23 +246,18 @@ void handleSerialCommands() {
 }
 
 // ===================== TELEMETRY =====================
-void sendTelemetry(unsigned long now) {
+void printTelemetry(unsigned long now) {
   Serial.print("SYS_TIME:"); Serial.print(now / 1000.0, 2);
-  Serial.print(" TEST_TIMER:");
-  Serial.print(currentState == TESTING ? (now - testStartTime) / 1000.0 : 0.0, 2);
-  Serial.print(" T_SHIELD:"); Serial.print(t_shield, 2);
-  Serial.print(" T_HOT:"); Serial.print(t_hot, 2);
-  Serial.print(" T_COLD:"); Serial.print(t_cold, 2);
-  Serial.print(" TARGET:"); Serial.print(current_setpoint, 2);
+  Serial.print(" T_SHIELD:"); Serial.print(tempShield, 2);
+  Serial.print(" T_HOT:"); Serial.print(tempHot, 2);
+  Serial.print(" T_COLD:"); Serial.print(tempCold, 2);
+  Serial.print(" TARGET:"); Serial.print(targetTemp, 2);
 
   Serial.print(" STATE:");
   switch (currentState) {
-    case IDLE: Serial.println("IDLE"); break;
-    case HOMING: Serial.println("HOMING"); break;
-    case READY: Serial.println("READY"); break;
-    case HEATING: Serial.println("HEATING"); break;
-    case TESTING: Serial.println("TESTING"); break;
-    case ACT_REAL_WAIT: Serial.println("ACT_REAL_WAIT"); break;
-    case ACT_REAL_HOME: Serial.println("ACT_REAL_HOME"); break;
+    case STATE_IDLE: Serial.println("IDLE"); break;
+    case STATE_HOMING: Serial.println("HOMING"); break;
+    case STATE_READY: Serial.println("READY"); break;
+    case STATE_HEATING: Serial.println("HEATING"); break;
   }
 }
