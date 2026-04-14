@@ -18,9 +18,9 @@ const int PIN_DIR               = 14;
 const int PIN_OPT_SENSOR        = 0;  
 
 // --- Thermocouples (Software SPI - Dedicated DO Pins) ---
-const int PIN_CS_COLD         = 39;  
+const int PIN_CS_COLD           = 39;  
 const int PIN_CS_HOT            = 40;  
-const int PIN_CS_SHIELD           = 41; 
+const int PIN_CS_SHIELD         = 41; 
 
 // ============================================================================
 // HARDWARE OBJECTS & GLOBALS
@@ -132,6 +132,22 @@ void processCommand(String cmd) {
   if (cmd == "HELP") {
     printHelp();
   } 
+
+  // --- PURGE COMMANDS ---
+  else if (cmd == "PURGE") {
+    analogWrite(PIN_PWM_METHANE, 155);
+    analogWrite(PIN_PWM_OXYGEN, 155);
+    digitalWrite(PIN_RELAY_SOLENOID, HIGH);
+    digitalWrite(PIN_RELAY_IGNITER, HIGH);
+    if (!isPlotting) Serial.println("-> PURGE ACTIVE: Gases set to 155, Relays/Valves OPEN");
+  }
+  else if (cmd == "PURGE OFF") {
+    analogWrite(PIN_PWM_METHANE, 0);
+    analogWrite(PIN_PWM_OXYGEN, 0);
+    digitalWrite(PIN_RELAY_SOLENOID, LOW);
+    digitalWrite(PIN_RELAY_IGNITER, LOW);
+    if (!isPlotting) Serial.println("-> PURGE OFF: All gases and relays turned OFF");
+  }
   
   // --- RELAY COMMANDS ---
   else if (cmd == "SOL ON") {
@@ -172,12 +188,12 @@ void processCommand(String cmd) {
   }
 
   else if (cmd.startsWith("GAS ")) {
-    int val = cmd. substring(4).toInt();
+    int val = cmd.substring(4).toInt();
     val = constrain(val, 0, 255);
     analogWrite(PIN_PWM_OXYGEN, val);
     analogWrite(PIN_PWM_METHANE, val);
     if (!isPlotting) {
-      Serial.print("Gas PWM set to");
+      Serial.print("Gas PWM set to ");
       Serial.println(val);
     }
   }
@@ -252,13 +268,15 @@ void processCommand(String cmd) {
 
 void printHelp() {
   Serial.println("\n--- COMMAND MENU ---");
+  Serial.println("PURGE        : Turn Oxy/Meth to 155 and open all valves");
+  Serial.println("PURGE OFF    : Turn off all gases and close all valves");
   Serial.println("SOL ON       : Turn Solenoid Relay ON");
   Serial.println("SOL OFF      : Turn Solenoid Relay OFF");
   Serial.println("IGN ON       : Turn Igniter Relay ON");
   Serial.println("IGN OFF      : Turn Igniter Relay OFF");
   Serial.println("METHANE <val>: Set Methane PWM (0 to 255)");
   Serial.println("OXYGEN <val> : Set Oxygen PWM (0 to 255)");
-  Serial.println("GAS <val> : Set Gas PWM (0 to 255)");
+  Serial.println("GAS <val>    : Set Gas PWM (0 to 255)");
   Serial.println("STEP <pos>   : Move stepper to absolute position (e.g., STEP 3000)");
   Serial.println("STOP         : Stop the stepper motor immediately");
   Serial.println("OPT          : Read optical sensor state");

@@ -146,7 +146,7 @@ void updateState(unsigned long now) {
       }
       break;
 
-    case STATE_HEATING:
+    case STATE_HEATING: {
       // If any thermocouple hits 1200C, go home and shut down
       if (tempShield >= cutoffTemp || tempHot >= cutoffTemp || tempCold >= cutoffTemp) {
         currentState = STATE_COMPLETE;
@@ -171,6 +171,7 @@ void updateState(unsigned long now) {
         digitalWrite(IGNITER_RELAY, LOW);
       }
       break;
+    }
 
     case STATE_COMPLETE:
       // Target reached (1200C). Ensure burner is off. Stepper will continuously move to posHome.
