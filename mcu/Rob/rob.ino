@@ -13,9 +13,9 @@ const int STEPPER_STEP = 15;
 const int STEPPER_DIR = 14;
 const int OPTICAL_SENSOR = 0;
 
-const int CS_SHIELD = 38;
+const int CS_COLD = 39;
 const int CS_HOT = 40;
-const int CS_COLD = 41;
+const int CS_SHIELD = 41;
 
 // ===================== HARDWARE =====================
 Adafruit_MAX31855 tcShield(CS_SHIELD);
@@ -30,6 +30,7 @@ const float homingSpeed = 3000.0;
 const long posHome = 0;
 const long posHeating = 6100;
 const float o2MethaneRatio = 6.0;
+const float cutoffTemp = 1200.0; // New constant for the 1200C threshold
 
 // ===================== PID =====================
 float kp = 5.0, ki = 0.15, kd = 40.0;
@@ -43,7 +44,7 @@ float tempCurve[5] = {1000, 1000, 1000, 1000, 1000};
 QuickPID burnerPid(&activeTemp, &pidOutput, &targetTemp, kp, ki, kd, QuickPID::Action::direct);
 
 // ===================== STATE =====================
-enum SystemState { STATE_IDLE, STATE_HOMING, STATE_READY, STATE_HEATING };
+enum SystemState { STATE_IDLE, STATE_HOMING, STATE_READY, STATE_HEATING, STATE_COMPLETE };
 SystemState currentState = STATE_IDLE;
 
 enum HomingPhase { PHASE_SEEK, PHASE_MOVE };
@@ -146,6 +147,13 @@ void updateState(unsigned long now) {
       break;
 
     case STATE_HEATING:
+      // If any thermocouple hits 1200C, go home and shut down
+      if (tempShield >= cutoffTemp || tempHot >= cutoffTemp || tempCold >= cutoffTemp) {
+        currentState = STATE_COMPLETE;
+        stepper.moveTo(posHome);
+        break; // Break early so we don't process heating logic below
+      }
+
       stepper.moveTo(posHeating); 
       digitalWrite(SOLENOID_RELAY, HIGH);
       
@@ -162,6 +170,11 @@ void updateState(unsigned long now) {
       } else {
         digitalWrite(IGNITER_RELAY, LOW);
       }
+      break;
+
+    case STATE_COMPLETE:
+      // Target reached (1200C). Ensure burner is off. Stepper will continuously move to posHome.
+      stopBurner();
       break;
   }
 }
@@ -225,8 +238,8 @@ void processSerial() {
 
   else if (cmd == "CMD:STOP") {
     autoStartSequence = false; 
-    currentState = STATE_IDLE;
-    stepper.moveTo(posHeating);
+    currentState = STATE_IDLE; // Stops burner via updateState() -> stopBurner()
+    stepper.moveTo(posHeating); // Actuator returns to heating position
   }
 
   else if (cmd.startsWith("SET_CURVE:")) {
@@ -259,5 +272,6 @@ void printTelemetry(unsigned long now) {
     case STATE_HOMING: Serial.println("HOMING"); break;
     case STATE_READY: Serial.println("READY"); break;
     case STATE_HEATING: Serial.println("HEATING"); break;
+    case STATE_COMPLETE: Serial.println("COMPLETE"); break;
   }
 }

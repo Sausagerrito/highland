@@ -18,9 +18,9 @@ const int PIN_DIR               = 14;
 const int PIN_OPT_SENSOR        = 0;  
 
 // --- Thermocouples (Software SPI - Dedicated DO Pins) ---
-const int PIN_CS_SHIELD         = 39;  
+const int PIN_CS_COLD         = 39;  
 const int PIN_CS_HOT            = 40;  
-const int PIN_CS_COLD           = 41; 
+const int PIN_CS_SHIELD           = 41; 
 
 // ============================================================================
 // HARDWARE OBJECTS & GLOBALS
