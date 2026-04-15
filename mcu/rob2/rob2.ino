@@ -8,12 +8,12 @@ const int SOL = 10, IGN = 1;
 
 const int STEP = 15, DIR = 14, OPT = 0;
 
-const int SHLD = 38, HOT = 40, COLD = 41;
+const int SHLD = 41, HOT = 40, COLD = 39;
 
-float Kp = 5.0, Ki = 0.15, Kd = 40.0;
+float Kp = 0.5, Ki = 0.15, Kd = 0.0;
 float t_Shld = 25, t_Hot = 25, t_Cold = 25;
 
-float output = 0, t_Active = 25, setP = 1000;
+float output = 0, t_Active = 25, setP = 800;
 
 QuickPID gasPID(&t_Active, &output, &setP, Kp, Ki, Kd, QuickPID::Action::direct);
 
@@ -24,7 +24,8 @@ Adafruit_MAX31855 tCold(COLD);
 AccelStepper stepper(AccelStepper::DRIVER, STEP, DIR);
 
 const float SPEED = 3000.0;
-const int SPRK = 5000;
+const int SPRK = 3000;
+const int GAS = 5000;
 int last = 0;
 const int sDelay = 250;
 const int duration = 30;
@@ -38,16 +39,21 @@ void setup() {
   pinMode(IGN, OUTPUT);
   pinMode(OPT, INPUT_PULLUP);
 
+  analogWrite(METH, 0);
+  analogWrite(OX, 0);
+  digitalWrite(IGN, LOW);
+  digitalWrite(SOL, LOW);
+
   tShld.begin();
   tHot.begin();
   tCold.begin();
 
-  stepper.setPinsInverted(false, false, false);
+  //stepper.setPinsInverted(false, false, false);
   stepper.setMinPulseWidth(20);
   stepper.setMaxSpeed(SPEED);
   stepper.setAcceleration(8000);
 
-  gasPID.SetOutputLimits(0, 255 / 6);
+  gasPID.SetOutputLimits(180, 255);
   gasPID.SetMode(QuickPID::Control::manual);
 }
 
@@ -63,7 +69,7 @@ void loop() {
     tcu();
     gasPID.Compute();
     analogWrite(METH, (int)output);
-    analogWrite(OX, 6 * (int)output);
+    analogWrite(OX, (int)output);
     TX();
   }
 }
@@ -76,12 +82,9 @@ void RX(){
 
   if (cmd == "CMD:HOME") {
     stepper.setSpeed(-3000);
-
     int count = 0;
-
     while (count < 10) {
       stepper.runSpeed();
-
       if (digitalRead(OPT) == HIGH) {
         count++;
       } else {
@@ -89,33 +92,57 @@ void RX(){
       }
     }
     stepper.setCurrentPosition(0);
-
   }
 
   else if (cmd == "CMD:SHIELD") {
     stepper.moveTo(6100);
   }
+
   else if (cmd == "CMD:START") {
+    analogWrite(METH, 255);
+    analogWrite(OX, 50);
     digitalWrite(SOL, HIGH);
-    delay(2000);
+    delay(GAS);
     digitalWrite(IGN, HIGH);
     delay(SPRK);
     digitalWrite(IGN, LOW);
-
+    tcu();
+    output = 255;
     gasPID.SetMode(QuickPID::Control::automatic);
+  }
+
+  else if (cmd == "CMD:STOP") {
+    gasPID.SetMode(QuickPID::Control::manual);
+    analogWrite(METH, 0);
+    analogWrite(OX, 0);
+    digitalWrite(SOL, LOW);
   }
 }
 
 void tcu() {
-  t_Shld = tShld.readCelsius();
-  t_Hot = tHot.readCelsius();
-  t_Cold = tCold.readCelsius();
-  t_Active = t_Shld;
+  float t_rawShld = tShld.readCelsius();
+  float t_rawHot = tHot.readCelsius();
+  float t_rawCold = tCold.readCelsius();
+
+  if (!isnan(temp_Shld)) {
+    t_Shld = t_rawShld;
+    t_Active = t_rawShld; 
+  }
+  
+  if (!isnan(t_rawHot)) {
+    t_Hot = t_rawHot;
+  }
+  
+  if (!isnan(t_rawCold)) {
+    t_Cold = t_rawCold;
+  }
 }
 
 void TX() {
   Serial.print("SHLD:"); Serial.print(t_Shld, 2);
+  Serial.print(",");
   Serial.print("HOT:"); Serial.print(t_Hot, 2);
+  Serial.print(",");
   Serial.print("COLD:"); Serial.print(t_Cold, 2);
   Serial.println();
 }
