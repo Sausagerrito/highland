@@ -29,22 +29,22 @@ const float targetSpeed = 3000.0;
 const float homingSpeed = 3000.0;
 const long posHome = 0;
 const long posHeating = 6100;
-const float o2MethaneRatio = 6.0;
-const float cutoffTemp = 1200.0; // New constant for the 1200C threshold
+const float cutoffTemp = 1200.0; 
 
 // ===================== PID =====================
-float kp = 5.0, ki = 0.15, kd = 40.0;
+// Values imported from rob2.ino
+float kp = 0.5, ki = 0.15, kd = 0.2;
 float tempShield = 25.0, tempHot = 25.0, tempCold = 25.0;
 float pidOutput = 0.0;
 
 float activeTemp = 25.0;
-float targetTemp = 1000.0;
-float tempCurve[5] = {1000, 1000, 1000, 1000, 1000};
+float targetTemp = 1200.0; // Updated to match setP from rob2.ino
+float tempCurve[5] = {1200, 1200, 1200, 1200, 1200};
 
 QuickPID burnerPid(&activeTemp, &pidOutput, &targetTemp, kp, ki, kd, QuickPID::Action::direct);
 
 // ===================== STATE =====================
-enum SystemState { STATE_IDLE, STATE_HOMING, STATE_READY, STATE_HEATING, STATE_COMPLETE };
+enum SystemState { STATE_IDLE, STATE_HOMING, STATE_READY, STATE_HEATING };
 SystemState currentState = STATE_IDLE;
 
 enum HomingPhase { PHASE_SEEK, PHASE_MOVE };
@@ -58,7 +58,9 @@ unsigned long lastSample = 0;
 const unsigned long sampleInterval = 250;
 
 unsigned long igniterStart = 0;
-const unsigned long igniterDuration = 5000;
+// Timing matched to GAS and SPRK from rob2.ino
+const unsigned long gasDelay = 3000;      
+const unsigned long igniterDuration = 3000;
 
 // ===================== SETUP =====================
 void setup() {
@@ -74,12 +76,11 @@ void setup() {
   tcHot.begin();
   tcCold.begin();
 
-  stepper.setPinsInverted(false, false, false);
   stepper.setMinPulseWidth(20);
   stepper.setMaxSpeed(targetSpeed); 
   stepper.setAcceleration(8000);
 
-  burnerPid.SetOutputLimits(0, 255 / 6);
+  burnerPid.SetOutputLimits(0, 255);
   burnerPid.SetMode(QuickPID::Control::manual);
 }
 
@@ -92,12 +93,12 @@ void loop() {
   if (currentState == STATE_HOMING && homingPhase == PHASE_SEEK) {
     stepper.setSpeed(-homingSpeed); 
     stepper.runSpeed();
-
+    
     if (digitalRead(OPTICAL_SENSOR) == HIGH) {
       sensorDebounce++;
       if (sensorDebounce >= 10) {
         stepper.setSpeed(0);             
-        stepper.setCurrentPosition(0);   
+        stepper.setCurrentPosition(0);
         
         if (autoStartSequence) {
           stepper.moveTo(posHeating);
@@ -147,14 +148,13 @@ void updateState(unsigned long now) {
       break;
 
     case STATE_HEATING: {
-      // If any thermocouple hits 1200C, go home and shut down
-      if (tempShield >= cutoffTemp || tempHot >= cutoffTemp || tempCold >= cutoffTemp) {
-        currentState = STATE_COMPLETE;
+      // Actuator logic: Move home if set temp is reached
+      if (activeTemp >= targetTemp || tempShield >= cutoffTemp || tempHot >= cutoffTemp || tempCold >= cutoffTemp) {
         stepper.moveTo(posHome);
-        break; // Break early so we don't process heating logic below
+      } else {
+        stepper.moveTo(posHeating); 
       }
 
-      stepper.moveTo(posHeating); 
       digitalWrite(SOLENOID_RELAY, HIGH);
       
       burnerPid.SetMode(QuickPID::Control::automatic);
@@ -163,27 +163,23 @@ void updateState(unsigned long now) {
 
       unsigned long heatingTime = now - igniterStart;
       
-      if (heatingTime < 2000) {
+      // Adapted rob2.ino ignition sequence
+      if (heatingTime < gasDelay) {
         digitalWrite(IGNITER_RELAY, LOW);
-      } else if (heatingTime < 2000 + igniterDuration) {
+      } else if (heatingTime < gasDelay + igniterDuration) {
         digitalWrite(IGNITER_RELAY, HIGH);
       } else {
         digitalWrite(IGNITER_RELAY, LOW);
       }
       break;
     }
-
-    case STATE_COMPLETE:
-      // Target reached (1200C). Ensure burner is off. Stepper will continuously move to posHome.
-      stopBurner();
-      break;
   }
 }
 
 // ===================== HELPERS =====================
 void setValves() {
   analogWrite(METHANE_PWM, (int)pidOutput);
-  analogWrite(OXYGEN_PWM, (int)(pidOutput * o2MethaneRatio));
+  analogWrite(OXYGEN_PWM, (int)pidOutput);
 }
 
 void stopBurner() {
@@ -196,10 +192,21 @@ void stopBurner() {
 }
 
 void readSensors() {
-  tempShield = tcShield.readCelsius();
-  tempHot = tcHot.readCelsius();
-  tempCold = tcCold.readCelsius();
-  activeTemp = tempShield;
+  float rawShield = tcShield.readCelsius();
+  float rawHot = tcHot.readCelsius();
+  float rawCold = tcCold.readCelsius();
+
+  // Added isnan checks from rob2.ino to prevent PID from spiking if sensor disconnects
+  if (!isnan(rawShield)) {
+    tempShield = rawShield;
+    activeTemp = tempShield;
+  }
+  if (!isnan(rawHot)) {
+    tempHot = rawHot;
+  }
+  if (!isnan(rawCold)) {
+    tempCold = rawCold;
+  }
 }
 
 // ===================== SERIAL =====================
@@ -211,6 +218,7 @@ void processSerial() {
 
   if (cmd == "CMD:HOME") {
     autoStartSequence = false;
+    
     if (digitalRead(OPTICAL_SENSOR) == HIGH) {
       stepper.setCurrentPosition(0);
       stepper.moveTo(0);
@@ -222,7 +230,6 @@ void processSerial() {
       sensorDebounce = 0;
     }
   }
-
   else if (cmd == "CMD:START") {
     autoStartSequence = true;
     
@@ -236,19 +243,17 @@ void processSerial() {
       sensorDebounce = 0;
     }
   }
-
   else if (cmd == "CMD:STOP") {
     autoStartSequence = false; 
-    currentState = STATE_IDLE; // Stops burner via updateState() -> stopBurner()
-    stepper.moveTo(posHeating); // Actuator returns to heating position
+    currentState = STATE_IDLE; 
+    stepper.moveTo(posHome);
   }
-
   else if (cmd.startsWith("SET_CURVE:")) {
     String values = cmd.substring(10);
-
+    
     for (int i = 0; i < 5; i++) {
       int idx = values.indexOf(',');
-
+      
       if (idx == -1) {
         tempCurve[i] = values.toFloat();
         break;
@@ -268,11 +273,11 @@ void printTelemetry(unsigned long now) {
   Serial.print(" TARGET:"); Serial.print(targetTemp, 2);
 
   Serial.print(" STATE:");
+  
   switch (currentState) {
     case STATE_IDLE: Serial.println("IDLE"); break;
     case STATE_HOMING: Serial.println("HOMING"); break;
     case STATE_READY: Serial.println("READY"); break;
     case STATE_HEATING: Serial.println("HEATING"); break;
-    case STATE_COMPLETE: Serial.println("COMPLETE"); break;
   }
 }

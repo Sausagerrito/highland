@@ -10,10 +10,10 @@ const int STEP = 15, DIR = 14, OPT = 0;
 
 const int SHLD = 41, HOT = 40, COLD = 39;
 
-float Kp = 0.5, Ki = 0.15, Kd = 0.0;
+float Kp = 0.5, Ki = 0.15, Kd = 0.2;
 float t_Shld = 25, t_Hot = 25, t_Cold = 25;
 
-float output = 0, t_Active = 25, setP = 800;
+float output = 0, t_Active = 25, setP = 1200;
 
 QuickPID gasPID(&t_Active, &output, &setP, Kp, Ki, Kd, QuickPID::Action::direct);
 
@@ -25,8 +25,10 @@ AccelStepper stepper(AccelStepper::DRIVER, STEP, DIR);
 
 const float SPEED = 3000.0;
 const int SPRK = 3000;
-const int GAS = 5000;
-int last = 0;
+const int GAS = 3000;
+
+// Changed to unsigned long to prevent millis() overflow
+unsigned long last = 0; 
 const int sDelay = 250;
 const int duration = 30;
 
@@ -53,12 +55,13 @@ void setup() {
   stepper.setMaxSpeed(SPEED);
   stepper.setAcceleration(8000);
 
-  gasPID.SetOutputLimits(180, 255);
+  gasPID.SetOutputLimits(0, 255);
   gasPID.SetMode(QuickPID::Control::manual);
 }
 
 void loop() {
-  int now = millis();
+  // Changed to unsigned long to prevent millis() overflow
+  unsigned long now = millis();
 
   stepper.run();
   RX();
@@ -100,7 +103,7 @@ void RX(){
 
   else if (cmd == "CMD:START") {
     analogWrite(METH, 255);
-    analogWrite(OX, 50);
+    analogWrite(OX, 100);
     digitalWrite(SOL, HIGH);
     delay(GAS);
     digitalWrite(IGN, HIGH);
@@ -124,7 +127,8 @@ void tcu() {
   float t_rawHot = tHot.readCelsius();
   float t_rawCold = tCold.readCelsius();
 
-  if (!isnan(temp_Shld)) {
+  // Corrected the variable name here
+  if (!isnan(t_rawShld)) {
     t_Shld = t_rawShld;
     t_Active = t_rawShld; 
   }
