@@ -4,47 +4,39 @@
 #include <SPI.h>
 
 // ===================== PINS =====================
-const int METHANE_PWM = 19;
-const int OXYGEN_PWM = 18;
-const int SOLENOID_RELAY = 10;
-const int IGNITER_RELAY = 1;
+const int METH = 19, OX = 18;
+const int SOL = 10, IGN = 1;
 
-const int STEPPER_STEP = 15;
-const int STEPPER_DIR = 14;
-const int OPTICAL_SENSOR = 0;
+const int STEP = 15, DIR = 14, OPT = 0;
 
-const int CS_COLD = 39;
-const int CS_HOT = 40;
-const int CS_SHIELD = 41;
+const int SHLD = 41, HOT = 40, COLD = 39;
 
 // ===================== HARDWARE =====================
-Adafruit_MAX31855 tcShield(CS_SHIELD);
-Adafruit_MAX31855 tcHot(CS_HOT);
-Adafruit_MAX31855 tcCold(CS_COLD);
+Adafruit_MAX31855 tShld(SHLD);
+Adafruit_MAX31855 tHot(HOT);
+Adafruit_MAX31855 tCold(COLD);
 
-AccelStepper stepper(AccelStepper::DRIVER, STEPPER_STEP, STEPPER_DIR);
+AccelStepper stepper(AccelStepper::DRIVER, STEP, DIR);
 
 // ===================== CONSTANTS =====================
-const float targetSpeed = 3000.0;
-const float homingSpeed = 3000.0;
+const float SPEED = 4000.0;
 const long posHome = 0;
 const long posHeating = 6100;
-const float cutoffTemp = 1200.0; 
+const float cutoffTemp = 1400.0; 
 
 // ===================== PID =====================
-// Values imported from rob2.ino
-float kp = 0.5, ki = 0.15, kd = 0.2;
-float tempShield = 25.0, tempHot = 25.0, tempCold = 25.0;
-float pidOutput = 0.0;
+float Kp = 0.2, Ki = 0.05, Kd = 0.05;
+float t_Shld = 25.0, t_Hot = 25.0, t_Cold = 25.0;
+float output = 0.0;
 
-float activeTemp = 25.0;
-float targetTemp = 1200.0; // Updated to match setP from rob2.ino
+float t_Active = 25.0;
+float setP = 1200.0; 
 float tempCurve[5] = {1200, 1200, 1200, 1200, 1200};
 
-QuickPID burnerPid(&activeTemp, &pidOutput, &targetTemp, kp, ki, kd, QuickPID::Action::direct);
+QuickPID gasPID(&t_Active, &output, &setP, Kp, Ki, Kd, QuickPID::Action::direct);
 
 // ===================== STATE =====================
-enum SystemState { STATE_IDLE, STATE_HOMING, STATE_READY, STATE_HEATING };
+enum SystemState { STATE_IDLE, STATE_HOMING, STATE_READY, STATE_HEATING, STATE_TESTING };
 SystemState currentState = STATE_IDLE;
 
 enum HomingPhase { PHASE_SEEK, PHASE_MOVE };
@@ -52,52 +44,57 @@ HomingPhase homingPhase = PHASE_SEEK;
 
 int sensorDebounce = 0;
 bool autoStartSequence = false;
+bool skipPreheat = false;
 
 // ===================== TIMING =====================
-unsigned long lastSample = 0;
-const unsigned long sampleInterval = 250;
+unsigned long last = 0;
+const int sDelay = 250 ;
 
 unsigned long igniterStart = 0;
-// Timing matched to GAS and SPRK from rob2.ino
-const unsigned long gasDelay = 3000;      
-const unsigned long igniterDuration = 3000;
+unsigned long testStartTime = 0;
+unsigned long testDurationMillis = 600000; 
+
+const int GAS = 3000;      
+const int SPRK = 3000;
 
 // ===================== SETUP =====================
 void setup() {
   Serial.begin(115200);
 
-  pinMode(METHANE_PWM, OUTPUT);
-  pinMode(OXYGEN_PWM, OUTPUT);
-  pinMode(SOLENOID_RELAY, OUTPUT);
-  pinMode(IGNITER_RELAY, OUTPUT);
-  pinMode(OPTICAL_SENSOR, INPUT_PULLUP);
+  pinMode(METH, OUTPUT);
+  pinMode(OX, OUTPUT);
+  pinMode(SOL, OUTPUT);
+  pinMode(IGN, OUTPUT);
+  pinMode(OPT, INPUT_PULLUP);
 
-  tcShield.begin();
-  tcHot.begin();
-  tcCold.begin();
+  tShld.begin();
+  tHot.begin();
+  tCold.begin();
 
   stepper.setMinPulseWidth(20);
-  stepper.setMaxSpeed(targetSpeed); 
+  stepper.setMaxSpeed(SPEED); 
   stepper.setAcceleration(8000);
 
-  burnerPid.SetOutputLimits(0, 255);
-  burnerPid.SetMode(QuickPID::Control::manual);
+  gasPID.SetOutputLimits(0, 255);
+  gasPID.SetSampleTimeUs(250000);
+  gasPID.SetMode(QuickPID::Control::manual);
 }
 
 // ===================== LOOP =====================
 void loop() {
-  processSerial();
+  RX();
 
   unsigned long now = millis();
 
+  // Handle Stepper Homing non-blocking
   if (currentState == STATE_HOMING && homingPhase == PHASE_SEEK) {
-    stepper.setSpeed(-homingSpeed); 
+    stepper.setSpeed(-SPEED); 
     stepper.runSpeed();
     
-    if (digitalRead(OPTICAL_SENSOR) == HIGH) {
+    if (digitalRead(OPT) == HIGH) {
       sensorDebounce++;
       if (sensorDebounce >= 10) {
-        stepper.setSpeed(0);             
+        stepper.setSpeed(0);            
         stepper.setCurrentPosition(0);
         
         if (autoStartSequence) {
@@ -116,21 +113,28 @@ void loop() {
     stepper.run(); 
   }
 
-  if (now - lastSample >= sampleInterval) {
-    lastSample = now;
-    readSensors();
+  // Handle Core Loop 
+  if (now - last >= (unsigned long)sDelay) {
+    last = now;
+    tcu();
+    gasPID.Compute(); 
     updateState(now);
-    printTelemetry(now);
+    TX(now);
   }
 }
 
 // ===================== STATE MACHINE =====================
 void updateState(unsigned long now) {
+  // Global Safety Cutoff
+  if (t_Shld >= cutoffTemp || t_Hot >= cutoffTemp || t_Cold >= cutoffTemp) {
+    stopBurner();
+    currentState = STATE_IDLE;
+    stepper.moveTo(posHome);
+    return;
+  }
+
   switch (currentState) {
     case STATE_IDLE:
-      stopBurner();
-      break;
-
     case STATE_HOMING:
       stopBurner();
       break;
@@ -143,33 +147,52 @@ void updateState(unsigned long now) {
         autoStartSequence = false;
         currentState = STATE_HEATING;
         igniterStart = now;
-        burnerPid.Reset();
+        gasPID.Reset();
       }
       break;
 
     case STATE_HEATING: {
-      // Actuator logic: Move home if set temp is reached
-      if (activeTemp >= targetTemp || tempShield >= cutoffTemp || tempHot >= cutoffTemp || tempCold >= cutoffTemp) {
-        stepper.moveTo(posHome);
-      } else {
-        stepper.moveTo(posHeating); 
-      }
-
-      digitalWrite(SOLENOID_RELAY, HIGH);
+      stepper.moveTo(posHeating); 
+      digitalWrite(SOL, HIGH);
       
-      burnerPid.SetMode(QuickPID::Control::automatic);
-      burnerPid.Compute();
-      setValves();
-
       unsigned long heatingTime = now - igniterStart;
       
-      // Adapted rob2.ino ignition sequence
-      if (heatingTime < gasDelay) {
-        digitalWrite(IGNITER_RELAY, LOW);
-      } else if (heatingTime < gasDelay + igniterDuration) {
-        digitalWrite(IGNITER_RELAY, HIGH);
+      // Ignition Sequence
+      if (heatingTime < GAS) {
+        digitalWrite(IGN, LOW);
+        analogWrite(METH, 255);
+        analogWrite(OX, 50);
+      } else if (heatingTime < GAS + SPRK) {
+        digitalWrite(IGN, HIGH);
+        analogWrite(METH, 255);
+        analogWrite(OX, 50);
       } else {
-        digitalWrite(IGNITER_RELAY, LOW);
+        digitalWrite(IGN, LOW);
+        analogWrite(METH, 255);
+        analogWrite(OX, 255);
+        gasPID.SetMode(QuickPID::Control::automatic);
+        
+        //setValves(); 
+
+        // Transition logic
+        if (skipPreheat || t_Shld >= setP) {
+          currentState = STATE_TESTING;
+          testStartTime = now;
+          skipPreheat = false; 
+        }
+      }
+      break;
+    }
+
+    case STATE_TESTING: {
+      stepper.moveTo(posHome);
+      
+      digitalWrite(SOL, HIGH);
+      setValves(); 
+      
+      // Check if test duration has elapsed
+      if (now - testStartTime >= testDurationMillis) {
+        currentState = STATE_IDLE;
       }
       break;
     }
@@ -178,39 +201,37 @@ void updateState(unsigned long now) {
 
 // ===================== HELPERS =====================
 void setValves() {
-  analogWrite(METHANE_PWM, (int)pidOutput);
-  analogWrite(OXYGEN_PWM, (int)pidOutput);
+  analogWrite(METH, (int)output);
+  analogWrite(OX, (int)output);
 }
 
 void stopBurner() {
-  burnerPid.SetMode(QuickPID::Control::manual);
-  pidOutput = 0;
-  analogWrite(METHANE_PWM, 0);
-  analogWrite(OXYGEN_PWM, 0);
-  digitalWrite(SOLENOID_RELAY, LOW);
-  digitalWrite(IGNITER_RELAY, LOW);
+  gasPID.SetMode(QuickPID::Control::manual);
+  output = 0;
+  analogWrite(METH, 0);
+  analogWrite(OX, 0);
+  digitalWrite(SOL, LOW);
+  digitalWrite(IGN, LOW);
 }
 
-void readSensors() {
-  float rawShield = tcShield.readCelsius();
-  float rawHot = tcHot.readCelsius();
-  float rawCold = tcCold.readCelsius();
+void tcu() {
+  float t_rawShld = tShld.readCelsius();
+  float t_rawHot = tHot.readCelsius();
+  float t_rawCold = tCold.readCelsius();
 
-  // Added isnan checks from rob2.ino to prevent PID from spiking if sensor disconnects
-  if (!isnan(rawShield)) {
-    tempShield = rawShield;
-    activeTemp = tempShield;
-  }
-  if (!isnan(rawHot)) {
-    tempHot = rawHot;
-  }
-  if (!isnan(rawCold)) {
-    tempCold = rawCold;
+  if (!isnan(t_rawShld)) t_Shld = t_rawShld;
+  if (!isnan(t_rawHot)) t_Hot = t_rawHot;
+  if (!isnan(t_rawCold)) t_Cold = t_rawCold;
+
+  if (currentState == STATE_TESTING) {
+    t_Active = t_Hot;
+  } else {
+    t_Active = t_Shld;
   }
 }
 
 // ===================== SERIAL =====================
-void processSerial() {
+void RX() {
   if (!Serial.available()) return;
 
   String cmd = Serial.readStringUntil('\n');
@@ -218,8 +239,9 @@ void processSerial() {
 
   if (cmd == "CMD:HOME") {
     autoStartSequence = false;
+    skipPreheat = false;
     
-    if (digitalRead(OPTICAL_SENSOR) == HIGH) {
+    if (digitalRead(OPT) == HIGH) {
       stepper.setCurrentPosition(0);
       stepper.moveTo(0);
       currentState = STATE_READY;
@@ -232,8 +254,23 @@ void processSerial() {
   }
   else if (cmd == "CMD:START") {
     autoStartSequence = true;
+    skipPreheat = false;
     
-    if (digitalRead(OPTICAL_SENSOR) == HIGH) {
+    if (digitalRead(OPT) == HIGH) {
+      stepper.setCurrentPosition(0);
+      stepper.moveTo(posHeating);
+      currentState = STATE_READY;
+    } else {
+      currentState = STATE_HOMING;
+      homingPhase = PHASE_SEEK;
+      sensorDebounce = 0;
+    }
+  }
+  else if (cmd == "CMD:START_SKIP") {
+    autoStartSequence = true;
+    skipPreheat = true;
+    
+    if (digitalRead(OPT) == HIGH) {
       stepper.setCurrentPosition(0);
       stepper.moveTo(posHeating);
       currentState = STATE_READY;
@@ -245,8 +282,13 @@ void processSerial() {
   }
   else if (cmd == "CMD:STOP") {
     autoStartSequence = false; 
+    skipPreheat = false;
     currentState = STATE_IDLE; 
     stepper.moveTo(posHome);
+  }
+  else if (cmd.startsWith("SET_TIME:")) {
+    float timeSec = cmd.substring(9).toFloat();
+    testDurationMillis = (unsigned long)(timeSec * 1000.0);
   }
   else if (cmd.startsWith("SET_CURVE:")) {
     String values = cmd.substring(10);
@@ -261,23 +303,32 @@ void processSerial() {
       tempCurve[i] = values.substring(0, idx).toFloat();
       values = values.substring(idx + 1);
     }
+    setP = tempCurve[0];
   }
 }
 
 // ===================== TELEMETRY =====================
-void printTelemetry(unsigned long now) {
+void TX(unsigned long now) {
   Serial.print("SYS_TIME:"); Serial.print(now / 1000.0, 2);
-  Serial.print(" T_SHIELD:"); Serial.print(tempShield, 2);
-  Serial.print(" T_HOT:"); Serial.print(tempHot, 2);
-  Serial.print(" T_COLD:"); Serial.print(tempCold, 2);
-  Serial.print(" TARGET:"); Serial.print(targetTemp, 2);
+  
+  Serial.print(" TEST_TIMER:");
+  if (currentState == STATE_TESTING) {
+    Serial.print((now - testStartTime) / 1000.0, 2);
+  } else {
+    Serial.print(0.0, 2);
+  }
+  
+  Serial.print(" T_SHIELD:"); Serial.print(t_Shld, 2);
+  Serial.print(" T_HOT:"); Serial.print(t_Hot, 2);
+  Serial.print(" T_COLD:"); Serial.print(t_Cold, 2);
+  Serial.print(" TARGET:"); Serial.print(setP, 2);
 
   Serial.print(" STATE:");
-  
   switch (currentState) {
     case STATE_IDLE: Serial.println("IDLE"); break;
     case STATE_HOMING: Serial.println("HOMING"); break;
     case STATE_READY: Serial.println("READY"); break;
     case STATE_HEATING: Serial.println("HEATING"); break;
+    case STATE_TESTING: Serial.println("TESTING"); break;
   }
 }
