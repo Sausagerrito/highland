@@ -4,8 +4,9 @@
 #include <SPI.h>
 
 // ===================== PINS =====================
-const int METH = 19, OX = 18;
-const int SOL = 10, IGN = 1;
+const int METH = 18, OX = 19;
+
+const int SOL = 10, IGN = 1, AIR = 9;
 
 const int STEP = 15, DIR = 14, OPT = 0;
 
@@ -48,15 +49,16 @@ bool skipPreheat = false;
 
 // ===================== TIMING =====================
 unsigned long last = 0;
-const int sDelay = 250 ;
+const unsigned long sDelay = 250 ;
 
 unsigned long igniterStart = 0;
 unsigned long testStartTime = 0;
 unsigned long testDurationMillis = 600000; 
 
-const int GAS = 3000;      
-const int SPRK = 3000;
-
+const unsigned long GAS = 3000;      
+const unsigned long SPRK = 3000;
+const unsigned long AIR_ON = 5000;
+const unsigned long AIR_OFF = 10000;
 // ===================== SETUP =====================
 void setup() {
   Serial.begin(115200);
@@ -65,6 +67,7 @@ void setup() {
   pinMode(OX, OUTPUT);
   pinMode(SOL, OUTPUT);
   pinMode(IGN, OUTPUT);
+  pinMode(AIR, OUTPUT);
   pinMode(OPT, INPUT_PULLUP);
 
   tShld.begin();
@@ -75,7 +78,10 @@ void setup() {
   stepper.setMaxSpeed(SPEED); 
   stepper.setAcceleration(8000);
 
-  gasPID.SetOutputLimits(0, 255);
+  analogWriteFrequency(METH, 500);
+  analogWriteFrequency(OX, 500);
+
+  gasPID.SetOutputLimits(50, 255);
   gasPID.SetSampleTimeUs(250000);
   gasPID.SetMode(QuickPID::Control::manual);
 }
@@ -154,28 +160,29 @@ void updateState(unsigned long now) {
     case STATE_HEATING: {
       stepper.moveTo(posHeating); 
       digitalWrite(SOL, HIGH);
-      
+      digitalWrite(AIR, LOW);      
+
       unsigned long heatingTime = now - igniterStart;
       
       // Ignition Sequence
       if (heatingTime < GAS) {
         digitalWrite(IGN, LOW);
+        digitalWrite(AIR, LOW);      
         analogWrite(METH, 255);
         analogWrite(OX, 50);
       } else if (heatingTime < GAS + SPRK) {
         digitalWrite(IGN, HIGH);
+        digitalWrite(AIR, LOW);      
         analogWrite(METH, 255);
         analogWrite(OX, 50);
       } else {
         digitalWrite(IGN, LOW);
         analogWrite(METH, 255);
         analogWrite(OX, 255);
-        gasPID.SetMode(QuickPID::Control::automatic);
         
-        //setValves(); 
-
         // Transition logic
         if (skipPreheat || t_Shld >= setP) {
+          gasPID.SetMode(QuickPID::Control::automatic);
           currentState = STATE_TESTING;
           testStartTime = now;
           skipPreheat = false; 
@@ -188,9 +195,31 @@ void updateState(unsigned long now) {
       stepper.moveTo(posHome);
       
       digitalWrite(SOL, HIGH);
-      setValves(); 
+      setValves();
+
+      unsigned long elapsed = now - testStartTime;
       
-      // Check if test duration has elapsed
+      if (elapsed <= testDurationMillis && testDurationMillis > 0) {
+        float progress = (float)elapsed / testDurationMillis; 
+        
+        float segmentFloat = progress * 4.0; 
+        int segment = (int)segmentFloat;
+
+        if (segment >= 4) {
+          setP = tempCurve[4]; 
+        } else {
+          float segmentProgress = segmentFloat - segment;
+
+          setP = tempCurve[segment] + ((tempCurve[segment + 1] - tempCurve[segment]) * segmentProgress);
+        }
+      }
+
+      if ((now - testStartTime) % (AIR_ON + AIR_OFF) < AIR_ON) {
+        digitalWrite(AIR, HIGH);
+      } else {
+        digitalWrite(AIR, LOW);
+      }
+      
       if (now - testStartTime >= testDurationMillis) {
         currentState = STATE_IDLE;
       }
@@ -212,6 +241,7 @@ void stopBurner() {
   analogWrite(OX, 0);
   digitalWrite(SOL, LOW);
   digitalWrite(IGN, LOW);
+  digitalWrite(AIR, LOW);
 }
 
 void tcu() {
