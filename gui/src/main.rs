@@ -222,6 +222,24 @@ impl AppState {
 // ----------------------------------------------------------------------------
 // THREAD SPAWNING & RUNTIME
 // ----------------------------------------------------------------------------
+
+fn autodetect_teensy_port() -> Option<String> {
+    // Get a list of all available serial ports
+    let ports = serialport::available_ports().ok()?;
+
+    for port in ports {
+        // Check if the port is a USB device
+        if let serialport::SerialPortType::UsbPort(info) = port.port_type {
+            // PJRC's registered USB Vendor ID is 0x16C0
+            if info.vid == 0x16C0 {
+                return Some(port.port_name);
+            }
+        }
+    }
+
+    None
+}
+
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default().with_inner_size([1100.0, 800.0]),
@@ -232,16 +250,17 @@ fn main() -> eframe::Result<()> {
     let (tx_telemetry, rx_telemetry) = unbounded::<Telemetry>();
 
     thread::spawn(move || {
-        // NOTE: Change this path to match your actual OS serial port
-        // Windows example: "COM3"
-        // Mac/Linux example: "/dev/ttyACM0" or "/dev/cu.usbmodem..."
-        let port_name = "/dev/cu.usbmodem190622201";
+        // Auto-detect the port instead of hardcoding
+        let port_name = autodetect_teensy_port().expect("Failed to find Teensy. Is it plugged in?");
+
         let baud_rate = 115200; // Must match the Teensy's Serial.begin()
+
+        println!("✅ Teensy automatically detected on port: {}", port_name);
 
         let mut port = serialport::new(port_name, baud_rate)
             .timeout(Duration::from_millis(10))
             .open()
-            .expect("Failed to open serial port. Is the Teensy plugged in and the port correct?");
+            .expect("Failed to open serial port.");
 
         let mut serial_buf: Vec<u8> = vec![0; 1000];
         let mut line_buffer = String::new();
