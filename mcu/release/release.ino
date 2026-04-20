@@ -81,7 +81,7 @@ void setup() {
   analogWriteFrequency(METH, 500);
   analogWriteFrequency(OX, 500);
 
-  gasPID.SetOutputLimits(50, 255);
+  gasPID.SetOutputLimits(40, 255);
   gasPID.SetSampleTimeUs(250000);
   gasPID.SetMode(QuickPID::Control::manual);
 }
@@ -174,7 +174,7 @@ void updateState(unsigned long now) {
         digitalWrite(IGN, HIGH);
         digitalWrite(AIR, LOW);      
         analogWrite(METH, 255);
-        analogWrite(OX, 50);
+        analogWrite(OX, 40);
       } else {
         digitalWrite(IGN, LOW);
         analogWrite(METH, 255);
@@ -214,7 +214,7 @@ void updateState(unsigned long now) {
         }
       }
 
-      if ((now - testStartTime) % (AIR_ON + AIR_OFF) < AIR_ON) {
+      if ((now - testStartTime - 10000) % (AIR_ON + AIR_OFF) < AIR_ON) {
         digitalWrite(AIR, HIGH);
       } else {
         digitalWrite(AIR, LOW);
