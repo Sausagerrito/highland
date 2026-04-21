@@ -174,7 +174,7 @@ void updateState(unsigned long now) {
         digitalWrite(IGN, HIGH);
         digitalWrite(AIR, LOW);      
         analogWrite(METH, 255);
-        analogWrite(OX, 40);
+        analogWrite(OX, 50);
       } else {
         digitalWrite(IGN, LOW);
         analogWrite(METH, 255);
@@ -214,7 +214,7 @@ void updateState(unsigned long now) {
         }
       }
 
-      if ((now - testStartTime - 10000) % (AIR_ON + AIR_OFF) < AIR_ON) {
+      if (elapsed % (AIR_ON + AIR_OFF) >=  AIR_OFF) {
         digitalWrite(AIR, HIGH);
       } else {
         digitalWrite(AIR, LOW);
