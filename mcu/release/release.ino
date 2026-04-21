@@ -26,7 +26,7 @@ const long posHeating = 6100;
 const float cutoffTemp = 1250.0; 
 
 // ===================== PID =====================
-float Kp = 0.2, Ki = 0.05, Kd = 0.05;
+float Kp = 1, Ki = 0, Kd = 0;
 float t_Shld = 25.0, t_Hot = 25.0, t_Cold = 25.0;
 float output = 0.0;
 
@@ -55,7 +55,7 @@ unsigned long igniterStart = 0;
 unsigned long testStartTime = 0;
 unsigned long testDurationMillis = 600000; 
 
-const unsigned long GAS = 3000;      
+const unsigned long GAS = 5000;      
 const unsigned long SPRK = 3000;
 const unsigned long AIR_ON = 5000;
 const unsigned long AIR_OFF = 10000;
@@ -169,14 +169,15 @@ void updateState(unsigned long now) {
         digitalWrite(IGN, LOW);
         digitalWrite(AIR, LOW);      
         analogWrite(METH, 255);
-        analogWrite(OX, 50);
+        analogWrite(OX, 0);
       } else if (heatingTime < GAS + SPRK) {
         digitalWrite(IGN, HIGH);
         digitalWrite(AIR, LOW);      
         analogWrite(METH, 255);
-        analogWrite(OX, 50);
+        analogWrite(OX, 0);
       } else {
         digitalWrite(IGN, LOW);
+        output = 255;
         analogWrite(METH, 255);
         analogWrite(OX, 255);
         
@@ -352,6 +353,8 @@ void TX(unsigned long now) {
   Serial.print(" T_HOT:"); Serial.print(t_Hot, 2);
   Serial.print(" T_COLD:"); Serial.print(t_Cold, 2);
   Serial.print(" TARGET:"); Serial.print(setP, 2);
+  
+  Serial.print(" OUTPUT:"); Serial.print(output, 2);
 
   Serial.print(" STATE:");
   switch (currentState) {
