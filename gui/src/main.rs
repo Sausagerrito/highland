@@ -57,7 +57,7 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             export_directory: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-            curve_points: [1400.0; 5],
+            curve_points: [1200.0; 5],
             graph_window_sec: 60.0,
         }
     }
@@ -510,10 +510,10 @@ impl AppState {
                     for i in 0..5 {
                         columns[i].vertical_centered(|ui| {
                             ui.add(
-                                egui::Slider::new(&mut self.config.curve_points[i], 25.0..=2000.0)
+                                egui::Slider::new(&mut self.config.curve_points[i], 100.0..=1200.0)
                                     .vertical()
                                     .show_value(false)
-                                    .step_by(5.0),
+                                    .step_by(10.0),
                             );
                             ui.add_space(2.0);
                             ui.add(

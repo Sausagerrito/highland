@@ -23,7 +23,7 @@ AccelStepper stepper(AccelStepper::DRIVER, STEP, DIR);
 const float SPEED = 4000.0;
 const long posHome = 0;
 const long posHeating = 6100;
-const float cutoffTemp = 1400.0; 
+const float cutoffTemp = 1250.0; 
 
 // ===================== PID =====================
 float Kp = 0.2, Ki = 0.05, Kd = 0.05;
