@@ -29,7 +29,7 @@ const float cutoffTemp = 1250.0;
 float t_Shld = 25.0, t_Hot = 25.0, t_Cold = 25.0;
 float output = 0.0;
 
-float Kp = 1, Ki = 0, Kd = 1;
+float Kp = 1, Ki = 0.01, Kd = 1;
 
 float t_Active = 25.0;
 float setP = 1200.0; 
@@ -38,7 +38,7 @@ float tempCurve[5] = {1200, 1200, 1200, 1200, 1200};
 QuickPID gasPID(&t_Active, &output, &setP, Kp, Ki, Kd, QuickPID::Action::direct);
 
 // ===================== STATE =====================
-enum SystemState { STATE_IDLE, STATE_HOMING, STATE_READY, STATE_HEATING, STATE_TESTING };
+enum SystemState { STATE_IDLE, STATE_HOMING, STATE_READY, STATE_HEATING, STATE_TESTING, STATE_PURGE };
 SystemState currentState = STATE_IDLE;
 
 enum HomingPhase { PHASE_SEEK, PHASE_MOVE };
@@ -46,7 +46,6 @@ HomingPhase homingPhase = PHASE_SEEK;
 
 int sensorDebounce = 0;
 bool autoStartSequence = false;
-bool skipPreheat = false;
 
 // ===================== TIMING =====================
 unsigned long last = 0;
@@ -55,11 +54,13 @@ const unsigned long sDelay = 100 ;
 unsigned long igniterStart = 0;
 unsigned long testStartTime = 0;
 unsigned long testDurationMillis = 600000; 
+unsigned long purgeStartTime = 0;
 
 const unsigned long GAS = 5000;      
 const unsigned long SPRK = 3000;
 const unsigned long AIR_ON = 5000;
 const unsigned long AIR_OFF = 10000;
+
 // ===================== SETUP =====================
 void setup() {
   Serial.begin(115200);
@@ -185,11 +186,10 @@ void updateState(unsigned long now) {
         analogWrite(OX, 255);
         
         // Transition logic
-        if (skipPreheat || t_Shld >= setP) {
+        if (t_Shld >= setP) {
           gasPID.SetMode(QuickPID::Control::automatic);
           currentState = STATE_TESTING;
           testStartTime = now;
-          skipPreheat = false; 
         }
       }
       break;
@@ -212,9 +212,8 @@ void updateState(unsigned long now) {
         if (segment >= 4) {
           setP = tempCurve[4]; 
         } else {
-          float segmentProgress = segmentFloat - segment;
-
-          setP = tempCurve[segment] + ((tempCurve[segment + 1] - tempCurve[segment]) * segmentProgress);
+            float segmentProgress = segmentFloat - segment;
+            setP = tempCurve[segment] + ((tempCurve[segment + 1] - tempCurve[segment]) * segmentProgress);
         }
       }
 
@@ -225,6 +224,23 @@ void updateState(unsigned long now) {
       }
       
       if (now - testStartTime >= testDurationMillis) {
+        currentState = STATE_IDLE;
+      }
+      break;
+    }
+
+    case STATE_PURGE: {
+      // Non-blocking 10-second purge
+      stepper.moveTo(posHome); // Ensure rig is safely away
+      output = 255;
+      analogWrite(METH, 255);
+      analogWrite(OX, 255);
+      digitalWrite(SOL, HIGH); // Open the main solenoid
+      digitalWrite(IGN, LOW);  // Ensure spark is OFF
+      digitalWrite(AIR, HIGH); // Turn on air to blow it out
+      
+      if (now - purgeStartTime >= 10000) { // 10 seconds elapsed
+        stopBurner();
         currentState = STATE_IDLE;
       }
       break;
@@ -273,7 +289,6 @@ void RX() {
 
   if (cmd == "CMD:HOME") {
     autoStartSequence = false;
-    skipPreheat = false;
     
     if (digitalRead(OPT) == HIGH) {
       stepper.setCurrentPosition(0);
@@ -288,21 +303,6 @@ void RX() {
   }
   else if (cmd == "CMD:START") {
     autoStartSequence = true;
-    skipPreheat = false;
-    
-    if (digitalRead(OPT) == HIGH) {
-      stepper.setCurrentPosition(0);
-      stepper.moveTo(posHeating);
-      currentState = STATE_READY;
-    } else {
-      currentState = STATE_HOMING;
-      homingPhase = PHASE_SEEK;
-      sensorDebounce = 0;
-    }
-  }
-  else if (cmd == "CMD:START_SKIP") {
-    autoStartSequence = true;
-    skipPreheat = true;
     
     if (digitalRead(OPT) == HIGH) {
       stepper.setCurrentPosition(0);
@@ -316,9 +316,16 @@ void RX() {
   }
   else if (cmd == "CMD:STOP") {
     autoStartSequence = false; 
-    skipPreheat = false;
     currentState = STATE_IDLE; 
     stepper.moveTo(posHome);
+  }
+  else if (cmd == "CMD:PURGE") {
+    // Only allow purge if the system is safely idling or ready
+    if (currentState == STATE_IDLE || currentState == STATE_READY) {
+      currentState = STATE_PURGE;
+      purgeStartTime = millis();
+      gasPID.SetMode(QuickPID::Control::manual);
+    }
   }
   else if (cmd.startsWith("SET_TIME:")) {
     float timeSec = cmd.substring(9).toFloat();
@@ -366,5 +373,6 @@ void TX(unsigned long now) {
     case STATE_READY: Serial.println("READY"); break;
     case STATE_HEATING: Serial.println("HEATING"); break;
     case STATE_TESTING: Serial.println("TESTING"); break;
+    case STATE_PURGE: Serial.println("PURGE"); break;
   }
 }

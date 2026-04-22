@@ -16,8 +16,8 @@ use std::time::Duration;
 enum AppCommand {
     Home,
     Start,
-    StartSkip,
     Stop,
+    Purge,
     SetCurve([f64; 5]),
     SetTime(f64),
 }
@@ -39,6 +39,7 @@ struct Telemetry {
     t_hot: f64,
     t_cold: f64,
     target_temp: f64,
+    output: f64,
     state: SystemState,
 }
 
@@ -74,7 +75,6 @@ struct AppState {
     test_name: String,
     test_duration_sec: f64,
     is_recording: bool,
-    skip_preheat: bool,
     awaiting_ready: bool,
     test_start_offset: f64,
     current_state: SystemState,
@@ -115,7 +115,6 @@ impl AppState {
             test_name,
             test_duration_sec: 600.0,
             is_recording: false,
-            skip_preheat: false,
             awaiting_ready: false,
             test_start_offset: 0.0,
             current_state: SystemState::Idle,
@@ -224,13 +223,10 @@ impl AppState {
 // ----------------------------------------------------------------------------
 
 fn autodetect_teensy_port() -> Option<String> {
-    // Get a list of all available serial ports
     let ports = serialport::available_ports().ok()?;
 
     for port in ports {
-        // Check if the port is a USB device
         if let serialport::SerialPortType::UsbPort(info) = port.port_type {
-            // PJRC's registered USB Vendor ID is 0x16C0
             if info.vid == 0x16C0 {
                 return Some(port.port_name);
             }
@@ -250,10 +246,8 @@ fn main() -> eframe::Result<()> {
     let (tx_telemetry, rx_telemetry) = unbounded::<Telemetry>();
 
     thread::spawn(move || {
-        // Auto-detect the port instead of hardcoding
         let port_name = autodetect_teensy_port().expect("Failed to find Teensy. Is it plugged in?");
-
-        let baud_rate = 115200; // Must match the Teensy's Serial.begin()
+        let baud_rate = 115200;
 
         println!("✅ Teensy automatically detected on port: {}", port_name);
 
@@ -273,8 +267,8 @@ fn main() -> eframe::Result<()> {
                 let msg = match cmd {
                     AppCommand::Home => "CMD:HOME\n".to_string(),
                     AppCommand::Start => "CMD:START\n".to_string(),
-                    AppCommand::StartSkip => "CMD:START_SKIP\n".to_string(),
                     AppCommand::Stop => "CMD:STOP\n".to_string(),
+                    AppCommand::Purge => "CMD:PURGE\n".to_string(),
                     AppCommand::SetTime(time) => format!("SET_TIME:{}\n", time),
                     AppCommand::SetCurve(c) => format!(
                         "SET_CURVE:{:.1},{:.1},{:.1},{:.1},{:.1}\n",
@@ -307,7 +301,6 @@ fn main() -> eframe::Result<()> {
                         let _ = tx_telemetry.send(telemetry);
                     }
                 } else {
-                    // Print debug/status messages from the Teensy that aren't telemetry
                     println!("Teensy: {}", line);
                 }
             }
@@ -334,6 +327,7 @@ fn parse_telemetry(line: &str) -> Option<Telemetry> {
     let mut t_hot = 0.0;
     let mut t_cold = 0.0;
     let mut target_temp = 0.0;
+    let mut output = 0.0;
     let mut state = SystemState::Idle;
 
     let parts: Vec<&str> = line.split_whitespace().collect();
@@ -348,6 +342,7 @@ fn parse_telemetry(line: &str) -> Option<Telemetry> {
                 "T_HOT" => t_hot = value.parse().unwrap_or(0.0),
                 "T_COLD" => t_cold = value.parse().unwrap_or(0.0),
                 "TARGET" => target_temp = value.parse().unwrap_or(0.0),
+                "OUTPUT" => output = value.parse().unwrap_or(0.0),
                 "STATE" => {
                     state = match value {
                         "HOMING" => SystemState::Homing,
@@ -369,6 +364,7 @@ fn parse_telemetry(line: &str) -> Option<Telemetry> {
         t_hot,
         t_cold,
         target_temp,
+        output,
         state,
     })
 }
@@ -538,7 +534,22 @@ impl AppState {
             ui.heading(egui::RichText::new("Execution").strong().size(18.0));
             ui.add_space(8.0);
 
-            ui.checkbox(&mut self.skip_preheat, "Skip Preheat");
+            ui.add_enabled_ui(
+                !self.is_recording && self.current_state == SystemState::Idle,
+                |ui| {
+                    if ui
+                        .add_sized(
+                            [ui.available_width(), 35.0],
+                            egui::Button::new("💨 PURGE VALVES (10s)"),
+                        )
+                        .clicked()
+                    {
+                        let _ = self.tx_cmd.send(AppCommand::Purge);
+                        self.show_toast("Purge sequence initiated", false);
+                    }
+                },
+            );
+
             ui.add_space(8.0);
 
             if !self.is_recording {
@@ -566,12 +577,8 @@ impl AppState {
                         .tx_cmd
                         .send(AppCommand::SetCurve(self.config.curve_points));
 
-                    if self.skip_preheat {
-                        let _ = self.tx_cmd.send(AppCommand::StartSkip);
-                    } else {
-                        self.awaiting_ready = true;
-                        let _ = self.tx_cmd.send(AppCommand::Home);
-                    }
+                    self.awaiting_ready = true;
+                    let _ = self.tx_cmd.send(AppCommand::Home);
                 }
             } else {
                 if ui
@@ -729,7 +736,7 @@ impl AppState {
                 ))
                 .fill(ui.visuals().widgets.noninteractive.bg_fill);
 
-            ui.columns(4, |columns| {
+            ui.columns(5, |columns| {
                 card_frame.show(&mut columns[0], |ui| {
                     ui.vertical_centered(|ui| {
                         ui.label("Heat Shield");
@@ -797,6 +804,18 @@ impl AppState {
                                 } else {
                                     egui::Color32::GRAY
                                 }),
+                        );
+                    });
+                });
+                card_frame.show(&mut columns[4], |ui| {
+                    ui.vertical_centered(|ui| {
+                        ui.label("Valve Output");
+                        let percent = (latest.output / 255.0) * 100.0;
+                        ui.label(
+                            egui::RichText::new(format!("{:.0}%", percent))
+                                .size(28.0)
+                                .strong()
+                                .color(egui::Color32::LIGHT_GREEN),
                         );
                     });
                 });
