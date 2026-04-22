@@ -26,9 +26,10 @@ const long posHeating = 6100;
 const float cutoffTemp = 1250.0; 
 
 // ===================== PID =====================
-float Kp = 1, Ki = 0, Kd = 0;
 float t_Shld = 25.0, t_Hot = 25.0, t_Cold = 25.0;
 float output = 0.0;
+
+float Kp = 1, Ki = 0, Kd = 1;
 
 float t_Active = 25.0;
 float setP = 1200.0; 
@@ -49,7 +50,7 @@ bool skipPreheat = false;
 
 // ===================== TIMING =====================
 unsigned long last = 0;
-const unsigned long sDelay = 250 ;
+const unsigned long sDelay = 100 ;
 
 unsigned long igniterStart = 0;
 unsigned long testStartTime = 0;
@@ -82,7 +83,9 @@ void setup() {
   analogWriteFrequency(OX, 500);
 
   gasPID.SetOutputLimits(40, 255);
-  gasPID.SetSampleTimeUs(250000);
+  gasPID.SetSampleTimeUs(100000);
+  gasPID.SetTunings(Kp, Ki, Kd, QuickPID::pMode::pOnMeas, QuickPID::dMode::dOnMeas, QuickPID::iAwMode::iAwCondition);
+  
   gasPID.SetMode(QuickPID::Control::manual);
 }
 
