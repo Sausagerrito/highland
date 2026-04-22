@@ -145,6 +145,8 @@ void updateState(unsigned long now) {
 
   switch (currentState) {
     case STATE_IDLE:
+      stopBurner();
+      break;
     case STATE_HOMING:
       stopBurner();
       break;
