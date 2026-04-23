@@ -123,7 +123,7 @@ void loop() {
     stepper.run(); 
   }
 
-  // Handle Core Loop 
+  // Core Loop 
   if (now - last >= (unsigned long)sDelay) {
     last = now;
     tcu();
@@ -135,7 +135,6 @@ void loop() {
 
 // ===================== STATE MACHINE =====================
 void updateState(unsigned long now) {
-  // Global Safety Cutoff
   if (t_Shld >= cutoffTemp || t_Hot >= cutoffTemp || t_Cold >= cutoffTemp) {
     stopBurner();
     currentState = STATE_IDLE;
@@ -187,7 +186,7 @@ void updateState(unsigned long now) {
         analogWrite(METH, 255);
         analogWrite(OX, 255);
         
-        // Transition logic
+        // State Transition
         if (t_Shld >= setP) {
           gasPID.SetMode(QuickPID::Control::automatic);
           currentState = STATE_TESTING;
@@ -232,16 +231,14 @@ void updateState(unsigned long now) {
     }
 
     case STATE_PURGE: {
-      // Non-blocking 10-second purge
-      stepper.moveTo(posHome); // Ensure rig is safely away
+      stepper.moveTo(posHome);
       output = 255;
       analogWrite(METH, 255);
       analogWrite(OX, 255);
-      digitalWrite(SOL, HIGH); // Open the main solenoid
-      digitalWrite(IGN, LOW);  // Ensure spark is OFF
-      digitalWrite(AIR, HIGH); // Turn on air to blow it out
-      
-      if (now - purgeStartTime >= 10000) { // 10 seconds elapsed
+      digitalWrite(SOL, HIGH);  
+      digitalWrite(IGN, LOW);  
+      digitalWrite(AIR, HIGH);       
+      if (now - purgeStartTime >= 30000) { 
         stopBurner();
         currentState = STATE_IDLE;
       }
@@ -322,7 +319,6 @@ void RX() {
     stepper.moveTo(posHome);
   }
   else if (cmd == "CMD:PURGE") {
-    // Only allow purge if the system is safely idling or ready
     if (currentState == STATE_IDLE || currentState == STATE_READY) {
       currentState = STATE_PURGE;
       purgeStartTime = millis();

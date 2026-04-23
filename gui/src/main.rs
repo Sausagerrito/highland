@@ -291,7 +291,6 @@ fn main() -> eframe::Result<()> {
                 Err(e) => eprintln!("Serial Read Error: {:?}", e),
             }
 
-            // Process complete lines separated by '\n'
             while let Some(pos) = line_buffer.find('\n') {
                 let line = line_buffer[..pos].trim().to_string();
                 line_buffer.drain(..=pos);
@@ -433,7 +432,7 @@ impl eframe::App for AppState {
 }
 
 // ----------------------------------------------------------------------------
-// UI COMPONENT METHODS (Modular Extraction)
+// UI COMPONENTS
 // ----------------------------------------------------------------------------
 impl AppState {
     fn process_telemetry(&mut self) {
@@ -540,7 +539,7 @@ impl AppState {
                     if ui
                         .add_sized(
                             [ui.available_width(), 35.0],
-                            egui::Button::new("💨 PURGE VALVES (10s)"),
+                            egui::Button::new("💨 PURGE VALVES (30s)"),
                         )
                         .clicked()
                     {
@@ -815,7 +814,7 @@ impl AppState {
                             egui::RichText::new(format!("{:.0}%", percent))
                                 .size(28.0)
                                 .strong()
-                                .color(egui::Color32::LIGHT_GREEN),
+                                .color(egui::Color32::LIGHT_RED),
                         );
                     });
                 });
