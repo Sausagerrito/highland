@@ -35,6 +35,7 @@ float t_Active = 25.0;
 float setP = 1200.0; 
 float tempCurve[5] = {1200, 1200, 1200, 1200, 1200};
 
+
 QuickPID gasPID(&t_Active, &output, &setP, Kp, Ki, Kd, QuickPID::Action::direct);
 
 // ===================== STATE =====================
@@ -56,11 +57,10 @@ unsigned long testStartTime = 0;
 unsigned long testDurationMillis = 600000; 
 unsigned long purgeStartTime = 0;
 
-const unsigned long GAS = 5000;      
-const unsigned long SPRK = 3000;
-const unsigned long AIR_ON = 5000;
-const unsigned long AIR_OFF = 10000;
-
+unsigned long gas = 5000;
+unsigned long sprk = 3000;
+unsigned long air_on = 1000;
+unsigned long air_off = 1000;
 // ===================== SETUP =====================
 void setup() {
   Serial.begin(115200);
@@ -218,7 +218,7 @@ void updateState(unsigned long now) {
         }
       }
 
-      if (elapsed % (AIR_ON + AIR_OFF) >=  AIR_OFF) {
+      if (elapsed % (air_on + air_off) >= air_off) {
         digitalWrite(AIR, HIGH);
       } else {
         digitalWrite(AIR, LOW);
@@ -329,6 +329,19 @@ void RX() {
     float timeSec = cmd.substring(9).toFloat();
     testDurationMillis = (unsigned long)(timeSec * 1000.0);
   }
+  else if (cmd.startsWith("SET_SPRK:")) {
+    sprk = cmd.substring(9).toInt();  
+  }
+  else if (cmd.startsWith("SET_GAS:")) {
+    gas = cmd.substring(8).toInt();  
+  }
+  else if (cmd.startsWith("AIR_ON:")) {
+    air_on = cmd.substring(7).toInt();  
+  }
+  else if (cmd.startsWith("AIR_OFF:")) {
+    air_off = cmd.substring(8).toInt();  
+  }
+
   else if (cmd.startsWith("SET_CURVE:")) {
     String values = cmd.substring(10);
     

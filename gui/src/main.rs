@@ -1,6 +1,6 @@
-// ----------------------------------------------------------------------------
-// IMPORTS
-// ----------------------------------------------------------------------------
+/* ---------------------------------------------------------------------------- */
+/* IMPORTS */
+/* ---------------------------------------------------------------------------- */
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use eframe::egui;
 use egui_plot::{Corner, Legend, Line, LineStyle, Plot};
@@ -9,9 +9,9 @@ use std::path::PathBuf;
 use std::thread;
 use std::time::Duration;
 
-// ----------------------------------------------------------------------------
-// MESSAGING & ENUMS
-// ----------------------------------------------------------------------------
+/* ---------------------------------------------------------------------------- */
+/* MESSAGING & ENUMS */
+/* ---------------------------------------------------------------------------- */
 #[derive(Clone, Debug)]
 enum AppCommand {
     Home,
@@ -20,6 +20,11 @@ enum AppCommand {
     Purge,
     SetCurve([f64; 5]),
     SetTime(f64),
+    /* Added commands for the new timing variables */
+    SetGas(f64),
+    SetSprk(f64),
+    SetAirOn(f64),
+    SetAirOff(f64),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -43,15 +48,20 @@ struct Telemetry {
     state: SystemState,
 }
 
-// ----------------------------------------------------------------------------
-// CONFIGURATION & STATE
-// ----------------------------------------------------------------------------
+/* ---------------------------------------------------------------------------- */
+/* CONFIGURATION & STATE */
+/* ---------------------------------------------------------------------------- */
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 struct AppConfig {
     export_directory: PathBuf,
     curve_points: [f64; 5],
     graph_window_sec: f64,
+    /* Added state persistence for the new timing controls */
+    gas_sec: f64,
+    sprk_sec: f64,
+    air_on_sec: f64,
+    air_off_sec: f64,
 }
 
 impl Default for AppConfig {
@@ -60,6 +70,10 @@ impl Default for AppConfig {
             export_directory: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             curve_points: [1200.0; 5],
             graph_window_sec: 60.0,
+            gas_sec: 5.0,
+            sprk_sec: 2.0,
+            air_on_sec: 1.0,
+            air_off_sec: 1.0,
         }
     }
 }
@@ -87,9 +101,9 @@ struct AppState {
     rx_telemetry: Receiver<Telemetry>,
 }
 
-// ----------------------------------------------------------------------------
-// LOGIC & METHODS
-// ----------------------------------------------------------------------------
+/* ---------------------------------------------------------------------------- */
+/* LOGIC & METHODS */
+/* ---------------------------------------------------------------------------- */
 impl AppState {
     fn new(
         cc: &eframe::CreationContext<'_>,
@@ -218,9 +232,9 @@ impl AppState {
     }
 }
 
-// ----------------------------------------------------------------------------
-// THREAD SPAWNING & RUNTIME
-// ----------------------------------------------------------------------------
+/* ---------------------------------------------------------------------------- */
+/* THREAD SPAWNING & RUNTIME */
+/* ---------------------------------------------------------------------------- */
 
 fn autodetect_teensy_port() -> Option<String> {
     let ports = serialport::available_ports().ok()?;
@@ -260,9 +274,9 @@ fn main() -> eframe::Result<()> {
         let mut line_buffer = String::new();
 
         loop {
-            // --------------------------------------------------------
-            // 1. SEND COMMANDS TO TEENSY
-            // --------------------------------------------------------
+            /* -------------------------------------------------------- */
+            /* 1. SEND COMMANDS TO TEENSY */
+            /* -------------------------------------------------------- */
             while let Ok(cmd) = rx_cmd.try_recv() {
                 let msg = match cmd {
                     AppCommand::Home => "CMD:HOME\n".to_string(),
@@ -274,13 +288,18 @@ fn main() -> eframe::Result<()> {
                         "SET_CURVE:{:.1},{:.1},{:.1},{:.1},{:.1}\n",
                         c[0], c[1], c[2], c[3], c[4]
                     ),
+                    /* Converts float seconds back to ms for the Teensy to parse correctly */
+                    AppCommand::SetGas(s) => format!("SET_GAS:{}\n", (s * 1000.0) as u32),
+                    AppCommand::SetSprk(s) => format!("SET_SPRK:{}\n", (s * 1000.0) as u32),
+                    AppCommand::SetAirOn(s) => format!("AIR_ON:{}\n", (s * 1000.0) as u32),
+                    AppCommand::SetAirOff(s) => format!("AIR_OFF:{}\n", (s * 1000.0) as u32),
                 };
                 let _ = port.write(msg.as_bytes());
             }
 
-            // --------------------------------------------------------
-            // 2. READ TELEMETRY FROM TEENSY
-            // --------------------------------------------------------
+            /* -------------------------------------------------------- */
+            /* 2. READ TELEMETRY FROM TEENSY */
+            /* -------------------------------------------------------- */
             match port.read(serial_buf.as_mut_slice()) {
                 Ok(t) => {
                     if let Ok(s) = std::str::from_utf8(&serial_buf[..t]) {
@@ -408,9 +427,9 @@ fn setup_custom_fonts(ctx: &egui::Context) {
     ctx.set_fonts(fonts);
 }
 
-// ----------------------------------------------------------------------------
-// EFRAME EVENT LOOP & UI
-// ----------------------------------------------------------------------------
+/* ---------------------------------------------------------------------------- */
+/* EFRAME EVENT LOOP & UI */
+/* ---------------------------------------------------------------------------- */
 impl eframe::App for AppState {
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, eframe::APP_KEY, &self.config);
@@ -431,9 +450,9 @@ impl eframe::App for AppState {
     }
 }
 
-// ----------------------------------------------------------------------------
-// UI COMPONENTS
-// ----------------------------------------------------------------------------
+/* ---------------------------------------------------------------------------- */
+/* UI COMPONENTS */
+/* ---------------------------------------------------------------------------- */
 impl AppState {
     fn process_telemetry(&mut self) {
         while let Ok(data) = self.rx_telemetry.try_recv() {
@@ -469,7 +488,7 @@ impl AppState {
     fn draw_side_panel(&mut self, ui: &mut egui::Ui) {
         ui.add_space(10.0);
 
-        // Config Frame
+        /* Config Frame */
         egui::Frame::group(ui.style()).show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.heading(egui::RichText::new("Configuration").strong().size(18.0));
@@ -479,13 +498,32 @@ impl AppState {
             ui.text_edit_singleline(&mut self.test_name);
             ui.add_space(8.0);
 
-            ui.horizontal(|ui| {
-                ui.label("Duration (s):");
+            /* New Grid specifically built for the four timing boxes */
+            egui::Grid::new("timing_grid").num_columns(2).spacing([20.0, 6.0]).show(ui, |ui| {
+
+                ui.label("Test Duration:");
                 ui.add(
                     egui::DragValue::new(&mut self.test_duration_sec)
                         .speed(10.0)
                         .range(10.0..=3600.0),
                 );
+                ui.end_row();
+                
+                ui.label("Gas Preflow:");
+                ui.add(egui::DragValue::new(&mut self.config.gas_sec).speed(0.1).range(0.1..=60.0));
+                ui.end_row();
+
+                ui.label("Spark Ignition:");
+                ui.add(egui::DragValue::new(&mut self.config.sprk_sec).speed(0.1).range(0.1..=60.0));
+                ui.end_row();
+
+                ui.label("Compressed Air ON:");
+                ui.add(egui::DragValue::new(&mut self.config.air_on_sec).speed(0.1).range(0.1..=60.0));
+                ui.end_row();
+
+                ui.label("Compressed Air OFF:");
+                ui.add(egui::DragValue::new(&mut self.config.air_off_sec).speed(0.1).range(0.1..=60.0));
+                ui.end_row();
             });
 
             ui.add_space(20.0);
@@ -527,7 +565,7 @@ impl AppState {
 
         ui.add_space(20.0);
 
-        // Execution Frame
+        /* Execution Frame */
         egui::Frame::group(ui.style()).show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.heading(egui::RichText::new("Execution").strong().size(18.0));
@@ -575,6 +613,12 @@ impl AppState {
                     let _ = self
                         .tx_cmd
                         .send(AppCommand::SetCurve(self.config.curve_points));
+                    
+                    /* Commands to dispatch timing configuration to the Teensy when Start is pressed */
+                    let _ = self.tx_cmd.send(AppCommand::SetGas(self.config.gas_sec));
+                    let _ = self.tx_cmd.send(AppCommand::SetSprk(self.config.sprk_sec));
+                    let _ = self.tx_cmd.send(AppCommand::SetAirOn(self.config.air_on_sec));
+                    let _ = self.tx_cmd.send(AppCommand::SetAirOff(self.config.air_off_sec));
 
                     self.awaiting_ready = true;
                     let _ = self.tx_cmd.send(AppCommand::Home);
@@ -640,7 +684,7 @@ impl AppState {
     fn draw_dashboard(&mut self, ui: &mut egui::Ui) {
         ui.add_space(10.0);
 
-        // Header
+        /* Header */
         ui.horizontal(|ui| {
             let heading_height = ui.text_style_height(&egui::TextStyle::Heading);
             ui.add(
@@ -678,7 +722,7 @@ impl AppState {
         ui.separator();
         ui.add_space(10.0);
 
-        // Graph
+        /* Graph */
         let latest_time = self.history.last().map(|d| d.sys_time).unwrap_or(0.0);
         let start_time = latest_time - self.config.graph_window_sec;
 
@@ -724,7 +768,7 @@ impl AppState {
 
         ui.add_space(15.0);
 
-        // Stat Cards
+        /* Stat Cards */
         if let Some(latest) = self.history.last() {
             let card_frame = egui::Frame::default()
                 .inner_margin(12)
