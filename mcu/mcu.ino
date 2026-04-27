@@ -50,7 +50,7 @@ bool autoStartSequence = false;
 
 // ===================== TIMING =====================
 unsigned long last = 0;
-const unsigned long sDelay = 100 ;
+const unsigned long sDelay = 100;
 
 unsigned long igniterStart = 0;
 unsigned long testStartTime = 0;
@@ -170,12 +170,12 @@ void updateState(unsigned long now) {
       unsigned long heatingTime = now - igniterStart;
       
       // Ignition Sequence
-      if (heatingTime < GAS) {
+      if (heatingTime < gas) {
         digitalWrite(IGN, LOW);
         digitalWrite(AIR, LOW);      
         analogWrite(METH, 255);
         analogWrite(OX, 0);
-      } else if (heatingTime < GAS + SPRK) {
+      } else if (heatingTime < gas + sprk) {
         digitalWrite(IGN, HIGH);
         digitalWrite(AIR, LOW);      
         analogWrite(METH, 255);
