@@ -23,13 +23,12 @@ AccelStepper stepper(AccelStepper::DRIVER, STEP, DIR);
 const float SPEED = 4000.0;
 const long posHome = 0;
 const long posHeating = 6100;
-const float cutoffTemp = 1250.0; 
-
+const float cutoffTemp = 1250;
 // ===================== PID =====================
 float t_Shld = 25.0, t_Hot = 25.0, t_Cold = 25.0;
 float output = 0.0;
 
-float Kp = 1, Ki = 0.01, Kd = 1;
+float Kp = 0.25, Ki = 0.25, Kd = 0.15;
 
 float t_Active = 25.0;
 float setP = 1200.0; 
@@ -187,7 +186,7 @@ void updateState(unsigned long now) {
         analogWrite(OX, 255);
         
         // State Transition
-        if (t_Shld >= setP) {
+        if (t_Shld >= setP - 20) {
           gasPID.SetMode(QuickPID::Control::automatic);
           currentState = STATE_TESTING;
           testStartTime = now;
