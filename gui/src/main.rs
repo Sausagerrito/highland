@@ -20,7 +20,6 @@ enum AppCommand {
     Purge,
     SetCurve([f64; 5]),
     SetTime(f64),
-    /* Added commands for the new timing variables */
     SetGas(f64),
     SetSprk(f64),
     SetAirOn(f64),
@@ -57,7 +56,6 @@ struct AppConfig {
     export_directory: PathBuf,
     curve_points: [f64; 5],
     graph_window_sec: f64,
-    /* Added state persistence for the new timing controls */
     gas_sec: f64,
     sprk_sec: f64,
     air_on_sec: f64,
@@ -241,7 +239,7 @@ fn autodetect_teensy_port() -> Option<String> {
 
     for port in ports {
         if let serialport::SerialPortType::UsbPort(info) = port.port_type {
-            if info.vid == 0x16C0 {
+            if info.vid == 0x16C0 || info.vid == 0x2341 || info.vid == 0x1A86 {
                 return Some(port.port_name);
             }
         }
@@ -260,6 +258,9 @@ fn main() -> eframe::Result<()> {
     let (tx_telemetry, rx_telemetry) = unbounded::<Telemetry>();
 
     thread::spawn(move || {
+        // NOTE: For Arduino Uno simulation testing, you might need to change
+        // `autodetect_teensy_port()` to explicitly return your Uno's COM port,
+        // e.g., `Some("COM3".to_string())` or update the VID match in the function above.
         let port_name = autodetect_teensy_port().expect("Failed to find Teensy. Is it plugged in?");
         let baud_rate = 115200;
 
@@ -288,7 +289,6 @@ fn main() -> eframe::Result<()> {
                         "SET_CURVE:{:.1},{:.1},{:.1},{:.1},{:.1}\n",
                         c[0], c[1], c[2], c[3], c[4]
                     ),
-                    /* Converts float seconds back to ms for the Teensy to parse correctly */
                     AppCommand::SetGas(s) => format!("SET_GAS:{}\n", (s * 1000.0) as u32),
                     AppCommand::SetSprk(s) => format!("SET_SPRK:{}\n", (s * 1000.0) as u32),
                     AppCommand::SetAirOn(s) => format!("AIR_ON:{}\n", (s * 1000.0) as u32),
@@ -331,6 +331,9 @@ fn main() -> eframe::Result<()> {
         "UL2596 TAG Test Controller",
         options,
         Box::new(move |cc| {
+            // Force dark mode context globally
+            cc.egui_ctx.set_visuals(egui::Visuals::dark());
+
             setup_custom_fonts(&cc.egui_ctx);
             egui_extras::install_image_loaders(&cc.egui_ctx);
             Ok(Box::new(AppState::new(cc, tx_cmd, rx_telemetry)))
@@ -438,12 +441,22 @@ impl eframe::App for AppState {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.process_telemetry();
 
-        egui::Panel::left("control_panel")
+        // Used egui::SidePanel here instead of Panel and wrapped contents in a ScrollArea
+        egui::SidePanel::left("control_panel")
             .resizable(true)
             .max_size(300.0)
-            .show_inside(ui, |ui| self.draw_side_panel(ui));
+            .show_inside(ui, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    self.draw_side_panel(ui);
+                });
+            });
 
-        egui::CentralPanel::default().show_inside(ui, |ui| self.draw_dashboard(ui));
+        // Wrapped CentralPanel contents in a ScrollArea
+        egui::CentralPanel::default().show_inside(ui, |ui| {
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                self.draw_dashboard(ui);
+            });
+        });
 
         self.draw_toast(ui.ctx());
         ui.ctx().request_repaint();
@@ -498,33 +511,50 @@ impl AppState {
             ui.text_edit_singleline(&mut self.test_name);
             ui.add_space(8.0);
 
-            /* New Grid specifically built for the four timing boxes */
-            egui::Grid::new("timing_grid").num_columns(2).spacing([20.0, 6.0]).show(ui, |ui| {
+            egui::Grid::new("timing_grid")
+                .num_columns(2)
+                .spacing([20.0, 6.0])
+                .show(ui, |ui| {
+                    ui.label("Test Duration:");
+                    ui.add(
+                        egui::DragValue::new(&mut self.test_duration_sec)
+                            .speed(10.0)
+                            .range(10.0..=3600.0),
+                    );
+                    ui.end_row();
 
-                ui.label("Test Duration:");
-                ui.add(
-                    egui::DragValue::new(&mut self.test_duration_sec)
-                        .speed(10.0)
-                        .range(10.0..=3600.0),
-                );
-                ui.end_row();
-                
-                ui.label("Gas Preflow:");
-                ui.add(egui::DragValue::new(&mut self.config.gas_sec).speed(0.1).range(0.1..=60.0));
-                ui.end_row();
+                    ui.label("Gas Preflow:");
+                    ui.add(
+                        egui::DragValue::new(&mut self.config.gas_sec)
+                            .speed(0.1)
+                            .range(0.1..=60.0),
+                    );
+                    ui.end_row();
 
-                ui.label("Spark Ignition:");
-                ui.add(egui::DragValue::new(&mut self.config.sprk_sec).speed(0.1).range(0.1..=60.0));
-                ui.end_row();
+                    ui.label("Spark Ignition:");
+                    ui.add(
+                        egui::DragValue::new(&mut self.config.sprk_sec)
+                            .speed(0.1)
+                            .range(0.1..=60.0),
+                    );
+                    ui.end_row();
 
-                ui.label("Compressed Air ON:");
-                ui.add(egui::DragValue::new(&mut self.config.air_on_sec).speed(0.1).range(0.1..=60.0));
-                ui.end_row();
+                    ui.label("Compressed Air ON:");
+                    ui.add(
+                        egui::DragValue::new(&mut self.config.air_on_sec)
+                            .speed(0.1)
+                            .range(0.1..=60.0),
+                    );
+                    ui.end_row();
 
-                ui.label("Compressed Air OFF:");
-                ui.add(egui::DragValue::new(&mut self.config.air_off_sec).speed(0.1).range(0.1..=60.0));
-                ui.end_row();
-            });
+                    ui.label("Compressed Air OFF:");
+                    ui.add(
+                        egui::DragValue::new(&mut self.config.air_off_sec)
+                            .speed(0.1)
+                            .range(0.1..=60.0),
+                    );
+                    ui.end_row();
+                });
 
             ui.add_space(20.0);
 
@@ -613,12 +643,15 @@ impl AppState {
                     let _ = self
                         .tx_cmd
                         .send(AppCommand::SetCurve(self.config.curve_points));
-                    
-                    /* Commands to dispatch timing configuration to the Teensy when Start is pressed */
+
                     let _ = self.tx_cmd.send(AppCommand::SetGas(self.config.gas_sec));
                     let _ = self.tx_cmd.send(AppCommand::SetSprk(self.config.sprk_sec));
-                    let _ = self.tx_cmd.send(AppCommand::SetAirOn(self.config.air_on_sec));
-                    let _ = self.tx_cmd.send(AppCommand::SetAirOff(self.config.air_off_sec));
+                    let _ = self
+                        .tx_cmd
+                        .send(AppCommand::SetAirOn(self.config.air_on_sec));
+                    let _ = self
+                        .tx_cmd
+                        .send(AppCommand::SetAirOff(self.config.air_off_sec));
 
                     self.awaiting_ready = true;
                     let _ = self.tx_cmd.send(AppCommand::Home);
